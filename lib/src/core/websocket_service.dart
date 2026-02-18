@@ -105,7 +105,13 @@ class WebSocketService {
   void connect(String url, String userId, String username) {
     _disconnect();
 
-    _socket = IO.io(url, IO.OptionBuilder().setTransports(['polling', 'websocket']).build());
+    _socket = IO.io(
+      url,
+      IO.OptionBuilder()
+          .setPath('/socket.io/')
+          .setTransports(['websocket', 'polling'])
+          .build(),
+    );
 
     _socket!.onConnect((_) {
       debugPrint('Socket.IO connected, authenticating...');
