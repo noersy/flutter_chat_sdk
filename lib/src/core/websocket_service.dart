@@ -41,10 +41,8 @@ class MessageStatusEvent {
       roomId: json['room_id'] as String? ?? '',
       updates: updatesJson
           .map(
-            (u) => StatusUpdate(
-              messageId: u['message_id'] as String,
-              status: u['status'] as String,
-            ),
+            (u) =>
+                StatusUpdate(messageId: u['message_id'] as String, status: u['status'] as String),
           )
           .toList(),
     );
@@ -81,8 +79,7 @@ class RoomEvent {
       roomId: json['room_id'] as String? ?? '',
       userId: json['user_id'] as String?,
       username: json['username'] as String?,
-      memberIds:
-          (json['users'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+      memberIds: (json['users'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
     );
   }
 }
@@ -90,19 +87,16 @@ class RoomEvent {
 class WebSocketService {
   IO.Socket? _socket;
 
-  final StreamController<Message> _messageController =
-      StreamController<Message>.broadcast();
+  final StreamController<Message> _messageController = StreamController<Message>.broadcast();
   final StreamController<UserStatusEvent> _statusController =
       StreamController<UserStatusEvent>.broadcast();
   final StreamController<MessageStatusEvent> _messageStatusController =
       StreamController<MessageStatusEvent>.broadcast();
-  final StreamController<RoomEvent> _roomEventController =
-      StreamController<RoomEvent>.broadcast();
+  final StreamController<RoomEvent> _roomEventController = StreamController<RoomEvent>.broadcast();
 
   Stream<Message> get messageStream => _messageController.stream;
   Stream<UserStatusEvent> get statusStream => _statusController.stream;
-  Stream<MessageStatusEvent> get messageStatusStream =>
-      _messageStatusController.stream;
+  Stream<MessageStatusEvent> get messageStatusStream => _messageStatusController.stream;
   Stream<RoomEvent> get roomEventStream => _roomEventController.stream;
 
   /// Connect using Socket.IO protocol.
@@ -111,13 +105,7 @@ class WebSocketService {
   void connect(String url, String userId, String username) {
     _disconnect();
 
-    _socket = IO.io(
-      url,
-      IO.OptionBuilder()
-          .setTransports(['websocket'])
-          .disableAutoConnect()
-          .build(),
-    );
+    _socket = IO.io(url, IO.OptionBuilder().setTransports(['polling', 'websocket']).build());
 
     _socket!.onConnect((_) {
       debugPrint('Socket.IO connected, authenticating...');
@@ -195,7 +183,7 @@ class WebSocketService {
       debugPrint('Socket.IO connect error: $err');
     });
 
-    _socket!.connect();
+    // _socket!.connect(); // Auto-connect is enabled by default
   }
 
   /// Emit a socket.io event with a data payload.
