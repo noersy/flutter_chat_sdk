@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
-import 'package:web_socket_channel/web_socket_channel.dart';
-import '../data/models/message_model.dart';
+import 'package:flutter/foundation.dart';
+// ignore: library_prefixes
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../domain/entities/message.dart';
 
 /// Represents a user's online status change event
@@ -9,14 +9,21 @@ class UserStatusEvent {
   final String userId;
   final String username;
   final bool isOnline;
+  final DateTime? lastSeen;
 
-  const UserStatusEvent({required this.userId, required this.username, required this.isOnline});
+  const UserStatusEvent({
+    required this.userId,
+    required this.username,
+    required this.isOnline,
+    this.lastSeen,
+  });
 
   factory UserStatusEvent.fromJson(Map<String, dynamic> json) {
     return UserStatusEvent(
       userId: json['user_id'] as String,
-      username: json['username'] as String,
-      isOnline: json['is_online'] as bool,
+      username: json['username'] as String? ?? 'Unknown',
+      isOnline: json['is_online'] ?? (json['type'] == 'user_online'),
+      lastSeen: json['last_seen'] != null ? DateTime.tryParse(json['last_seen']) : null,
     );
   }
 }
@@ -24,20 +31,20 @@ class UserStatusEvent {
 /// Represents a batch of message status updates
 class MessageStatusEvent {
   final String roomId;
-  final String userId; // recipient whose status changed
   final List<StatusUpdate> updates;
 
-  const MessageStatusEvent({required this.roomId, required this.userId, required this.updates});
+  const MessageStatusEvent({required this.roomId, required this.updates});
 
   factory MessageStatusEvent.fromJson(Map<String, dynamic> json) {
     final updatesJson = json['updates'] as List<dynamic>? ?? [];
     return MessageStatusEvent(
       roomId: json['room_id'] as String? ?? '',
-      userId: json['user_id'] as String? ?? '',
       updates: updatesJson
           .map(
-            (u) =>
-                StatusUpdate(messageId: u['message_id'] as String, status: u['status'] as String),
+            (u) => StatusUpdate(
+              messageId: u['message_id'] as String,
+              status: u['status'] as String,
+            ),
           )
           .toList(),
     );
@@ -52,106 +59,154 @@ class StatusUpdate {
   const StatusUpdate({required this.messageId, required this.status});
 }
 
+/// Event for room membership changes
+class RoomEvent {
+  final String type; // user_joined, user_left, room_users
+  final String roomId;
+  final String? userId;
+  final String? username;
+  final List<String> memberIds;
+
+  const RoomEvent({
+    required this.type,
+    required this.roomId,
+    this.userId,
+    this.username,
+    this.memberIds = const [],
+  });
+
+  factory RoomEvent.fromJson(Map<String, dynamic> json) {
+    return RoomEvent(
+      type: json['type'] as String? ?? '',
+      roomId: json['room_id'] as String? ?? '',
+      userId: json['user_id'] as String?,
+      username: json['username'] as String?,
+      memberIds:
+          (json['users'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+    );
+  }
+}
+
 class WebSocketService {
-  WebSocketChannel? _channel;
-  final StreamController<Message> _messageController = StreamController<Message>.broadcast();
+  IO.Socket? _socket;
+
+  final StreamController<Message> _messageController =
+      StreamController<Message>.broadcast();
   final StreamController<UserStatusEvent> _statusController =
       StreamController<UserStatusEvent>.broadcast();
   final StreamController<MessageStatusEvent> _messageStatusController =
       StreamController<MessageStatusEvent>.broadcast();
+  final StreamController<RoomEvent> _roomEventController =
+      StreamController<RoomEvent>.broadcast();
 
   Stream<Message> get messageStream => _messageController.stream;
   Stream<UserStatusEvent> get statusStream => _statusController.stream;
-  Stream<MessageStatusEvent> get messageStatusStream => _messageStatusController.stream;
+  Stream<MessageStatusEvent> get messageStatusStream =>
+      _messageStatusController.stream;
+  Stream<RoomEvent> get roomEventStream => _roomEventController.stream;
 
-  void connect(String url) {
+  /// Connect using Socket.IO protocol.
+  /// [url] should be http(s)://host:port (e.g. "http://localhost:8080")
+  /// [userId] and [username] are sent via the `authenticate` event after connect.
+  void connect(String url, String userId, String username) {
     _disconnect();
-    try {
-      _channel = WebSocketChannel.connect(Uri.parse(url));
-      _channel!.stream.listen(
-        (data) {
-          _handleMessage(data);
-        },
-        onError: (error) {
-          print('WebSocket error: $error');
-          _disconnect();
-        },
-        onDone: () {
-          print('WebSocket disconnected');
-          _disconnect();
-        },
-      );
-    } catch (e, stack) {
-      print('WebSocket connection failed: $e');
-      print(stack);
-      _disconnect();
-    }
-  }
 
-  void _handleMessage(dynamic data) {
-    try {
-      print('WS Received: $data'); // Debug: Raw payload
-      final Map<String, dynamic> json = jsonDecode(data);
+    _socket = IO.io(
+      url,
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .disableAutoConnect()
+          .build(),
+    );
 
-      // Handle different message types
-      final type = json['type'];
-      if (type == 'error') {
-        print('WS Error: ${json['error']}');
-        return;
-      }
-      if (type == 'message_ack') {
-        print('WS Ack: ${json['message_id']}');
-        return;
-      }
-      if (type == 'user_online' || type == 'user_offline') {
-        _statusController.add(UserStatusEvent.fromJson(json));
-        return;
-      }
-      if (type == 'status_update') {
-        _messageStatusController.add(MessageStatusEvent.fromJson(json));
-        return;
-      }
-
-      // Parse as message — auto-send delivery confirmation
-      try {
-        final message = MessageModel.fromJson(json);
-        _messageController.add(message);
-
-        // Auto-send message_delivered for received messages
-        _sendDelivered([message.id], message.roomId);
-      } catch (e) {
-        print('WS: Could not parse as MessageModel: $e');
-      }
-    } catch (e) {
-      print('Failed to parse message: $e');
-    }
-  }
-
-  /// Send delivery confirmation for message IDs
-  void _sendDelivered(List<String> messageIds, String roomId) {
-    sendMessage({
-      'type': 'message_delivered',
-      'room_id': roomId,
-      'payload': {'message_ids': messageIds},
+    _socket!.onConnect((_) {
+      debugPrint('Socket.IO connected, authenticating...');
+      _socket!.emit('authenticate', {'user_id': userId, 'username': username});
     });
+
+    _socket!.on('authenticated', (data) {
+      debugPrint('Socket.IO authenticated: $data');
+    });
+
+    _socket!.on('message', (data) {
+      try {
+        final json = _toMap(data);
+        if (json != null) {
+          _messageController.add(Message.fromJson(json));
+        }
+      } catch (e) {
+        debugPrint('WS: Could not parse message: $e');
+      }
+    });
+
+    _socket!.on('message_ack', (data) {
+      // Acknowledgement — no action needed in SDK
+    });
+
+    _socket!.on('user_online', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        json['type'] = 'user_online';
+        _statusController.add(UserStatusEvent.fromJson(json));
+      }
+    });
+
+    _socket!.on('user_offline', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        json['type'] = 'user_offline';
+        _statusController.add(UserStatusEvent.fromJson(json));
+      }
+    });
+
+    _socket!.on('room_users', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        json['type'] = 'room_users';
+        _roomEventController.add(RoomEvent.fromJson(json));
+      }
+    });
+
+    _socket!.on('user_joined', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        json['type'] = 'user_joined';
+        _roomEventController.add(RoomEvent.fromJson(json));
+      }
+    });
+
+    _socket!.on('user_left', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        json['type'] = 'user_left';
+        _roomEventController.add(RoomEvent.fromJson(json));
+      }
+    });
+
+    _socket!.on('error', (data) {
+      debugPrint('Socket.IO error: $data');
+    });
+
+    _socket!.onDisconnect((_) {
+      debugPrint('Socket.IO disconnected');
+    });
+
+    _socket!.onConnectError((err) {
+      debugPrint('Socket.IO connect error: $err');
+    });
+
+    _socket!.connect();
   }
 
-  /// Send delivery confirmation for messages loaded via REST
-  void sendDeliveredForMessages(List<String> messageIds, String roomId) {
-    if (messageIds.isEmpty) return;
-    _sendDelivered(messageIds, roomId);
-  }
-
-  void sendMessage(Map<String, dynamic> data) {
-    if (_channel != null) {
-      _channel!.sink.add(jsonEncode(data));
-    }
+  /// Emit a socket.io event with a data payload.
+  void emit(String event, Map<String, dynamic> data) {
+    _socket?.emit(event, data);
   }
 
   void _disconnect() {
-    if (_channel != null) {
-      _channel!.sink.close();
-      _channel = null;
+    if (_socket != null) {
+      _socket!.dispose();
+      _socket = null;
     }
   }
 
@@ -160,5 +215,15 @@ class WebSocketService {
     _messageController.close();
     _statusController.close();
     _messageStatusController.close();
+    _roomEventController.close();
+  }
+
+  /// Safely converts socket.io event data to Map<String, dynamic>.
+  /// The socket_io_client may deliver data as a Map or as a List with one Map.
+  Map<String, dynamic>? _toMap(dynamic data) {
+    if (data is Map<String, dynamic>) return data;
+    if (data is Map) return Map<String, dynamic>.from(data);
+    if (data is List && data.isNotEmpty) return _toMap(data.first);
+    return null;
   }
 }
