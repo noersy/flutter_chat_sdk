@@ -1,42 +1,40 @@
 # Flutter Chat SDK
 
-A comprehensive Flutter SDK for the WebSocket Chat application. This SDK handles REST API communication for user/room management and WebSocket connections for real-time messaging, status updates, and online presence.
+A comprehensive Flutter package for integrating real-time chat capabilities into your application using Socket.IO.
 
 ## Features
 
-- **Authentication**: Register and Login users.
-- **Room Management**: Create, list, join, and manage chat rooms.
-- **Real-time Messaging**: Send and receive messages instantly via WebSockets.
-- **Message History**: Fetch paginated message history with automatic delivery status updates.
-- **Read Receipts**: Real-time updates for message delivery (server received) and read status (recipient opened).
-- **User Presence**: Monitor online/offline status of users.
-- **Type-Safe**: Fully typed domain entities (User, Room, Message).
+- **Real-time Messaging**: Send and receive messages instantly.
+- **Room Management**: Join and leave chat rooms for group or private conversations.
+- **User Status**: Track online/offline status of users.
+- **Message Status**: Support for message delivery status (sent, delivered, read).
+- **Event Handling**: Listen to various events like room changes and user status updates.
+- **Secure Storage**: Automatically manages user session persistence.
 
 ## Installation
 
-Add this package to your `pubspec.yaml`:
+Add the following to your `pubspec.yaml` file:
 
 ```yaml
 dependencies:
   flutter_chat_sdk:
-    path: /path/to/flutter_chat_sdk
+    path: ./flutter_chat_sdk  # Adjust path as necessary relative to your project
 ```
 
 ## Usage
 
 ### 1. Initialization
 
-Initialize the `ChatClient` singleton with your backend Base URL and WebSocket URL.
+Initialize the SDK with your WebSocket server URL. This should be done early in your application lifecycle (e.g., in `main.dart`).
 
 ```dart
 import 'package:flutter_chat_sdk/flutter_chat_sdk.dart';
 
 void main() async {
-  final client = ChatClient();
+  WidgetsFlutterBinding.ensureInitialized();
   
-  await client.init(
-    baseUrl: 'http://localhost:8080', 
-    wsUrl: 'ws://localhost:8080/ws'
+  await ChatClient().init(
+    wsUrl: 'http://localhost:3000', // Replace with your Socket.IO server URL
   );
   
   runApp(MyApp());
@@ -45,112 +43,101 @@ void main() async {
 
 ### 2. Authentication
 
-Register a new user or login with existing credentials. The client automatically manages the session state.
+Connect to the chat server with a user's identity. If a session was previously saved, the SDK can attempt to restore it automatically during initialization.
 
 ```dart
-final client = ChatClient();
+// Connect with user details
+await ChatClient().connect('user_id_123', 'John Doe');
 
-// Register
-try {
-  final user = await client.register('username', 'email@example.com', 'password123');
-  print('Registered as: ${user.username}');
-} catch (e) {
-  print('Registration failed: $e');
-}
-
-// Login
-try {
-  final user = await client.login('email@example.com', 'password123');
-  print('Logged in as: ${user.id}');
-} catch (e) {
-  print('Login failed: $e');
-}
-
-// Logout
-await client.logout();
+// Disconnect
+await ChatClient().disconnect();
 ```
 
 ### 3. Room Management
 
-Create rooms, list your rooms, and manage members.
+Join or leave specific rooms to listen for messages.
 
 ```dart
-// Create a room
-final room = await client.createRoom('My Cool Group', 'group');
+// Join a room
+ChatClient().joinRoom('room_abc_123');
 
-// List my joined rooms
-final rooms = await client.getMyRooms();
-
-// Get room members (includes online status)
-final members = await client.getRoomMembers(room.id);
-
-// Add a user to a room by username
-await client.addUserToRoomByUsername(room.id, 'friend_username');
+// Leave a room
+ChatClient().leaveRoom('room_abc_123');
 ```
 
-### 4. Real-time Messaging
+### 4. Sending Messages
 
-To send and receive messages, you must first "join" the room via WebSocket.
+Send text messages or messages with attachments/payloads.
 
 ```dart
-// 1. Join the room via WebSocket to subscribe to events
-client.joinRoomWS(roomId);
-
-// 2. Listen for incoming messages
-client.messageStream.listen((message) {
-  print('[${message.senderId}] ${message.content}');
-});
-
-// 3. Send a message
-client.sendMessage(roomId, 'Hello everyone!');
+ChatClient().sendMessage(
+  'room_abc_123',
+  'Hello, world!',
+  type: 'text', // Optional, default is 'text'
+  title: 'Greeting', // Optional
+  payload: {'custom': 'data'}, // Optional
+  attachmentUrls: ['https://example.com/image.png'], // Optional
+);
 ```
 
-### 5. Message History & Status
+### 5. Listening to Events
 
-Fetch past messages and handle read receipts.
+The SDK exposes several streams to handle real-time updates.
 
-```dart
-// Get message history (paginated)
-// Validates 'sent' messages from others and auto-sends 'delivered' receipts
-final history = await client.getMessages(roomId, limit: 50, offset: 0);
-
-// Mark a room as read (sends 'read' receipts to senders)
-client.markAsRead(roomId);
-```
-
-### 6. Event Listeners
-
-Listen to real-time status changes.
+#### Incoming Messages
 
 ```dart
-// Listen for User Online/Offline events
-client.userStatusStream.listen((event) {
-  print('User ${event.userId} is now ${event.isOnline ? 'Online' : 'Offline'}');
-});
-
-// Listen for Message Status updates (delivered/read)
-client.statusUpdateStream.listen((event) {
-  print('Message ${event.messageId} was ${event.status} by ${event.userId}');
+ChatClient().messageStream.listen((Message message) {
+  print('New message in ${message.roomId}: ${message.content}');
 });
 ```
 
-## Architecture
+#### User Status Updates
 
-The SDK follows Clean Architecture principles:
-
-- **Presentation**: `ChatClient` (Facade pattern)
-- **Domain**: Entities (`User`, `Room`, `Message`) and fail-safe logic.
-- **Data**: Repositories handling API and WebSocket data sources.
-- **Core**: Networking and WebSocket management.
-
-## Error Handling
-
-All methods throw exceptions on failure. It is recommended to wrap calls in `try-catch` blocks.
+Subscribe to a user's status to receive updates.
 
 ```dart
-try {
-  await client.login('user', 'pass');
-} catch (e) {
-  // Handle login error (e.g. invalid credentials)
-}
+// Subscribe to track a user
+ChatClient().subscribeStatus('target_user_id');
+
+// Listen for status changes
+ChatClient().userStatusStream.listen((UserStatusEvent event) {
+  print('${event.username} is now ${event.isOnline ? 'Online' : 'Offline'}');
+});
 ```
+
+#### Room Events
+
+Track when users join or leave a room.
+
+```dart
+ChatClient().roomEventStream.listen((RoomEvent event) {
+  if (event.type == 'user_joined') {
+    print('${event.username} joined room ${event.roomId}');
+  } else if (event.type == 'user_left') {
+    print('${event.username} left room ${event.roomId}');
+  }
+});
+```
+
+#### Message Status Updates
+
+Track the lifecycle of a message (e.g., when it is read).
+
+```dart
+ChatClient().statusUpdateStream.listen((MessageStatusEvent event) {
+  for (var update in event.updates) {
+    print('Message ${update.messageId} status: ${update.status}');
+  }
+});
+```
+
+## Domain Entities
+
+- **User**: Represents a chat user with properties like `id`, `username`, `email`, `isOnline`, etc.
+- **Message**: Represents a chat message with `id`, `roomId`, `content`, `type`, `status`, `createdAt`, etc.
+- **Room**: Represents a chat room.
+
+## Contributing
+
+Contributions are welcome! Please submit a pull request or open an issue for any bugs or feature requests.
