@@ -105,11 +105,13 @@ class WebSocketService {
   void connect(String url, String userId, String username) {
     _disconnect();
 
+    debugPrint('Connecting to Socket.IO at: $url/socket.io/');
     _socket = IO.io(
       url,
       IO.OptionBuilder()
           .setPath('/socket.io/')
-          .setTransports(['websocket', 'polling'])
+          .setTransports(['polling', 'websocket'])
+          .enableForceNewConnection()
           .build(),
     );
 
