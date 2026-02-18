@@ -188,7 +188,18 @@ class WebSocketService {
     });
 
     _socket!.onConnectError((err) {
-      debugPrint('Socket.IO connect error: $err');
+      debugPrint('❌ Socket.IO connect error: $err');
+    });
+
+    _socket!.onError((data) {
+      debugPrint('❌ Socket.IO error event: $data');
+    });
+
+    // Add connection timeout logging
+    Future.delayed(Duration(seconds: 5), () {
+      if (_socket != null && !_socket!.connected) {
+        debugPrint('⏱️ Socket.IO connection timeout after 5 seconds');
+      }
     });
 
     // _socket!.connect(); // Auto-connect is enabled by default
