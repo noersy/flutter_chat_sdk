@@ -94,7 +94,7 @@ class _ChatPageState extends State<ChatPage> {
   final _messageController = TextEditingController();
 
   String _currentRoomId = 'general';
-  final List<Message> _messages = [];
+  final List<Map<String, dynamic>> _messages = [];
   final Map<String, UserStatusEvent> _userStatuses = {};
 
   @override
@@ -106,15 +106,24 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _init() async {
     await _client.init(wsUrl: widget.wsUrl, userId: widget.userId, username: widget.username);
 
+    // Listen for authentication before joining
+    _client.authStream.listen((isAuthenticated) {
+      if (isAuthenticated) {
+        debugPrint('✅ Authenticated, joining room...');
+        _joinRoom(_currentRoomId);
+      }
+    });
+
     _client.messageStream.listen((message) {
-      if (message.roomId == _currentRoomId) {
+      if (message is Map<String, dynamic> && message['room_id'] == _currentRoomId) {
         setState(() {
           _messages.add(message);
         });
 
         // Auto-subscribe to status of sender
-        if (message.userId != widget.userId && !_userStatuses.containsKey(message.userId)) {
-          _client.subscribeStatus(message.userId);
+        final userId = message['user_id'] as String?;
+        if (userId != null && userId != widget.userId && !_userStatuses.containsKey(userId)) {
+          _client.subscribeStatus(userId);
         }
       }
     });
@@ -176,7 +185,7 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     // Join the default room
-    _joinRoom(_currentRoomId);
+    // _joinRoom(_currentRoomId); // Moved to authStream listener
   }
 
   void _joinRoom(String roomId) {
@@ -196,7 +205,11 @@ class _ChatPageState extends State<ChatPage> {
   void _sendMessage() {
     if (_messageController.text.isEmpty) return;
 
-    _client.sendMessage(_currentRoomId, _messageController.text);
+    _client.sendMessage({
+      'room_id': _currentRoomId,
+      'content': _messageController.text,
+      'type': 'text',
+    });
     _messageController.clear();
   }
 
@@ -215,11 +228,26 @@ class _ChatPageState extends State<ChatPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title')),
-              TextField(controller: contentCtrl, decoration: const InputDecoration(labelText: 'Content')),
-              TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Category')),
-              TextField(controller: accountIdCtrl, decoration: const InputDecoration(labelText: 'Account ID')),
-              TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notes')),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(labelText: 'Title'),
+              ),
+              TextField(
+                controller: contentCtrl,
+                decoration: const InputDecoration(labelText: 'Content'),
+              ),
+              TextField(
+                controller: categoryCtrl,
+                decoration: const InputDecoration(labelText: 'Category'),
+              ),
+              TextField(
+                controller: accountIdCtrl,
+                decoration: const InputDecoration(labelText: 'Account ID'),
+              ),
+              TextField(
+                controller: notesCtrl,
+                decoration: const InputDecoration(labelText: 'Notes'),
+              ),
             ],
           ),
         ),
@@ -227,17 +255,17 @@ class _ChatPageState extends State<ChatPage> {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
-              _client.sendMessage(
-                _currentRoomId,
-                contentCtrl.text,
-                type: 'data',
-                title: titleCtrl.text,
-                payload: {
+              _client.sendMessage({
+                'room_id': _currentRoomId,
+                'content': contentCtrl.text,
+                'type': 'data',
+                'title': titleCtrl.text,
+                'payload': {
                   'category': categoryCtrl.text,
                   'account_id': accountIdCtrl.text,
                   'notes': notesCtrl.text,
                 },
-              );
+              });
               Navigator.pop(ctx);
             },
             child: const Text('Send'),
@@ -357,8 +385,17 @@ class _ChatPageState extends State<ChatPage> {
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final msg = _messages[index];
-                final isMe = msg.userId == widget.userId;
-                final isSystem = msg.userId == 'system';
+                final userId = msg['user_id'] as String? ?? 'unknown';
+                final username = msg['username'] as String? ?? 'Unknown';
+                final type = msg['type'] as String? ?? 'text';
+                final content = msg['content'] as String? ?? '';
+                final title = msg['title'] as String?;
+                final payload = msg['payload'] as Map<String, dynamic>?;
+                final createdAtStr = msg['created_at'] as String?;
+                final createdAt = createdAtStr != null ? DateTime.tryParse(createdAtStr) : null;
+
+                final isMe = userId == widget.userId;
+                final isSystem = userId == 'system';
 
                 return ListTile(
                   title: Align(
@@ -381,10 +418,10 @@ class _ChatPageState extends State<ChatPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                isMe ? 'You' : msg.username,
+                                isMe ? 'You' : username,
                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
                               ),
-                              if (msg.type != 'text') ...[
+                              if (type != 'text') ...[
                                 const SizedBox(width: 4),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
@@ -393,7 +430,7 @@ class _ChatPageState extends State<ChatPage> {
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    msg.type.toUpperCase(),
+                                    type.toUpperCase(),
                                     style: const TextStyle(
                                       fontSize: 8,
                                       fontWeight: FontWeight.bold,
@@ -403,13 +440,13 @@ class _ChatPageState extends State<ChatPage> {
                               ],
                             ],
                           ),
-                          if (msg.title != null)
+                          if (title != null)
                             Text(
-                              msg.title!,
+                              title,
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                             ),
-                          Text(msg.content),
-                          if (msg.payload != null)
+                          Text(content),
+                          if (payload != null)
                             Container(
                               margin: const EdgeInsets.only(top: 4),
                               padding: const EdgeInsets.all(4),
@@ -418,14 +455,15 @@ class _ChatPageState extends State<ChatPage> {
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
-                                msg.payload!.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
+                                payload.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
                                 style: const TextStyle(fontSize: 9, fontStyle: FontStyle.italic),
                               ),
                             ),
-                          Text(
-                            _formatTime(msg.createdAt),
-                            style: const TextStyle(fontSize: 8, color: Colors.black54),
-                          ),
+                          if (createdAt != null)
+                            Text(
+                              _formatTime(createdAt),
+                              style: const TextStyle(fontSize: 8, color: Colors.black54),
+                            ),
                         ],
                       ),
                     ),

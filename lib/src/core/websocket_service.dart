@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 // ignore: library_prefixes
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import '../domain/entities/message.dart';
 
 /// Represents a user's online status change event
 class UserStatusEvent {
@@ -87,17 +86,20 @@ class RoomEvent {
 class WebSocketService {
   IO.Socket? _socket;
 
-  final StreamController<Message> _messageController = StreamController<Message>.broadcast();
+  final StreamController<dynamic> _messageController = StreamController<dynamic>.broadcast();
   final StreamController<UserStatusEvent> _statusController =
       StreamController<UserStatusEvent>.broadcast();
   final StreamController<MessageStatusEvent> _messageStatusController =
       StreamController<MessageStatusEvent>.broadcast();
   final StreamController<RoomEvent> _roomEventController = StreamController<RoomEvent>.broadcast();
 
-  Stream<Message> get messageStream => _messageController.stream;
+  Stream<dynamic> get messageStream => _messageController.stream;
   Stream<UserStatusEvent> get statusStream => _statusController.stream;
   Stream<MessageStatusEvent> get messageStatusStream => _messageStatusController.stream;
   Stream<RoomEvent> get roomEventStream => _roomEventController.stream;
+
+  final StreamController<bool> _authController = StreamController<bool>.broadcast();
+  Stream<bool> get authStream => _authController.stream;
 
   /// Connect using Socket.IO protocol.
   /// [url] should be http(s)://host:port (e.g. "http://localhost:8080")
@@ -122,13 +124,23 @@ class WebSocketService {
 
     _socket!.on('authenticated', (data) {
       debugPrint('Socket.IO authenticated: $data');
+      _authController.add(true);
     });
 
     _socket!.on('message', (data) {
       try {
-        final json = _toMap(data);
-        if (json != null) {
-          _messageController.add(Message.fromJson(json));
+        if (data is List) {
+          for (var item in data) {
+            final json = _toMap(item);
+            if (json != null) {
+              _messageController.add(json);
+            }
+          }
+        } else {
+          final json = _toMap(data);
+          if (json != null) {
+            _messageController.add(json);
+          }
         }
       } catch (e) {
         debugPrint('WS: Could not parse message: $e');
@@ -223,9 +235,10 @@ class WebSocketService {
     _statusController.close();
     _messageStatusController.close();
     _roomEventController.close();
+    _authController.close();
   }
 
-  /// Safely converts socket.io event data to Map<String, dynamic>.
+  /// Safely converts socket.io event data to `Map<String, dynamic>`.
   /// The socket_io_client may deliver data as a Map or as a List with one Map.
   Map<String, dynamic>? _toMap(dynamic data) {
     if (data is Map<String, dynamic>) return data;

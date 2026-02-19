@@ -1,8 +1,9 @@
+// ignore_for_file: use_null_aware_elements
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'core/websocket_service.dart';
-import 'domain/entities/message.dart';
+
 import 'domain/entities/user.dart';
 
 export 'core/websocket_service.dart'
@@ -26,8 +27,8 @@ class ChatClient {
   final _userController = StreamController<User?>.broadcast();
   Stream<User?> get userStream => _userController.stream;
 
-  final _messagesController = StreamController<Message>.broadcast();
-  Stream<Message> get messageStream => _messagesController.stream;
+  final _messagesController = StreamController<dynamic>.broadcast();
+  Stream<dynamic> get messageStream => _messagesController.stream;
 
   Stream<UserStatusEvent> get userStatusStream => _webSocketService.statusStream;
 
@@ -35,6 +36,7 @@ class ChatClient {
   final _messageStatusController = StreamController<MessageStatusEvent>.broadcast();
 
   Stream<RoomEvent> get roomEventStream => _webSocketService.roomEventStream;
+  Stream<bool> get authStream => _webSocketService.authStream;
 
   bool _initialized = false;
   String? _wsUrl;
@@ -111,23 +113,15 @@ class ChatClient {
     _webSocketService.emit('leave', {'room_id': roomId});
   }
 
-  /// Send a message
-  void sendMessage(
-    String roomId,
-    String content, {
-    String type = 'text',
-    String? title,
-    Map<String, dynamic>? payload,
-    List<String>? attachmentUrls,
-  }) {
+  /// Send a message.
+  /// Only requires [content] and [roomId] (or [topic]).
+  /// Other fields can be passed via the optional [extraData] Map.
+  /// The SDK wraps this in {'messages': [payload]} before sending.
+  void sendMessage(Map<String, dynamic> messageData) {
     _requireAuth();
+
     _webSocketService.emit('message', {
-      'room_id': roomId,
-      'content': content,
-      'type': type,
-      if (title != null) 'title': title,
-      if (payload != null) 'payload': payload,
-      if (attachmentUrls != null) 'attachment_urls': attachmentUrls,
+      'messages': [messageData],
     });
   }
 
