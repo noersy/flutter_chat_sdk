@@ -134,6 +134,23 @@ class _ChatPageState extends State<ChatPage> {
       });
     });
 
+    // Listen to custom 'system_announcement' event
+    _client.on('system_announcement', (data) {
+      debugPrint('📢 Received system announcement: $data');
+      if (data is Map) {
+        final message = data['message'] ?? 'No message content';
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('📢 System Announcement: $message'),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    });
+
     // Listen for room membership events
     _client.roomEventStream.listen((event) {
       if (event.roomId != _currentRoomId) return;

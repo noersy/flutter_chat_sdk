@@ -137,6 +137,23 @@ class ChatClient {
     _webSocketService.emit('unsubscribe_status', {'target_user_id': targetUserId});
   }
 
+  /// Listen to a custom event.
+  /// [event] is the name of the event to listen to.
+  /// [handler] is the function to call when the event is received.
+  void on(String event, Function(dynamic) handler) {
+    // We don't strictly require auth for listening, but socket must be initialized.
+    if (!_initialized) {
+      throw Exception('SDK not initialized');
+    }
+    _webSocketService.on(event, handler);
+  }
+
+  /// Remove a custom event listener.
+  void off(String event) {
+    if (!_initialized) return;
+    _webSocketService.off(event);
+  }
+
   Future<void> _restoreSession() async {
     final userId = await _storage.read(key: _storageUserKey);
     final username = await _storage.read(key: _storageUsernameKey);

@@ -222,6 +222,16 @@ class WebSocketService {
     _socket?.emit(event, data);
   }
 
+  /// Listen to a custom event.
+  void on(String event, Function(dynamic) handler) {
+    _socket?.on(event, handler);
+  }
+
+  /// Remove a custom event listener.
+  void off(String event) {
+    _socket?.off(event);
+  }
+
   void _disconnect() {
     if (_socket != null) {
       _socket!.dispose();
