@@ -1,9 +1,9 @@
-// ignore_for_file: use_null_aware_elements
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:dio/dio.dart';
+import 'package:uuid/uuid.dart';
 import 'core/websocket_service.dart';
-
 import 'domain/entities/user.dart';
 
 export 'core/websocket_service.dart'
@@ -15,6 +15,8 @@ class ChatClient {
   ChatClient._internal();
 
   late WebSocketService _webSocketService;
+  final Dio _dio = Dio();
+  final _uuid = const Uuid();
 
   User? _currentUser;
   User? get currentUser => _currentUser;
@@ -36,17 +38,24 @@ class ChatClient {
   final _messageStatusController = StreamController<MessageStatusEvent>.broadcast();
 
   Stream<RoomEvent> get roomEventStream => _webSocketService.roomEventStream;
-  Stream<bool> get authStream => _webSocketService.authStream;
 
   bool _initialized = false;
   String? _wsUrl;
+  String? _apiUrl;
 
   /// Initialize the SDK.
-  /// [wsUrl]: Socket.IO server URL, e.g. "http://localhost:8080"
-  Future<void> init({required String wsUrl, String? userId, String? username}) async {
+  /// [wsUrl]: Socket.IO server URL (e.g. "http://localhost:8080")
+  /// [apiUrl]: HTTP API URL (e.g. "http://localhost:8080")
+  Future<void> init({
+    required String wsUrl,
+    required String apiUrl,
+    String? userId,
+    String? username,
+  }) async {
     if (_initialized) return;
 
     _wsUrl = wsUrl;
+    _apiUrl = apiUrl;
     _webSocketService = WebSocketService();
 
     _webSocketService.messageStream.listen((message) {
@@ -87,8 +96,8 @@ class ChatClient {
   void _connectSocketIO() {
     if (_currentUser == null || _wsUrl == null) return;
     debugPrint('Connecting to Socket.IO: $_wsUrl');
-    // WebSocketService handles authentication automatically after connect
-    _webSocketService.connect(_wsUrl!, _currentUser!.id, _currentUser!.username);
+    // WebSocketService handles connection
+    _webSocketService.connect(_wsUrl!);
   }
 
   /// Logout / Disconnect
@@ -113,16 +122,52 @@ class ChatClient {
     _webSocketService.emit('leave', {'room_id': roomId});
   }
 
-  /// Send a message.
+  /// Send a message via HTTP POST.
   /// Only requires [content] and [roomId] (or [topic]).
   /// Other fields can be passed via the optional [extraData] Map.
-  /// The SDK wraps this in {'messages': [payload]} before sending.
-  void sendMessage(Map<String, dynamic> messageData) {
+  Future<void> sendMessage(Map<String, dynamic> messageData) async {
     _requireAuth();
+    if (_apiUrl == null) throw Exception('API URL not set');
 
-    _webSocketService.emit('message', {
-      'messages': [messageData],
-    });
+    // Prepare payload matching backend expectations
+    // Backend expects: { messages: [ { topic, event, payload } ] }
+    // But for 'message' event, the payload itself is the message data.
+
+    // Important: we need to construct the FULL message object client-side now
+    // because the backend just broadcasts what we send.
+
+    final roomId = (messageData['room_id'] ?? messageData['topic']) as String?;
+    if (roomId == null) throw Exception('room_id is required');
+
+    final messageId = _uuid.v4();
+    final timestamp = DateTime.now().toIso8601String();
+
+    final fullPayload = {
+      ...messageData,
+      'id': messageId,
+      'user_id': _currentUser!.id,
+      'username': _currentUser!.username,
+      'created_at': timestamp,
+      'topic': roomId,
+      'room_id': roomId,
+    };
+
+    final body = {
+      'messages': [
+        {
+          'topic': roomId,
+          'event': 'message', // Standard chat event
+          'payload': fullPayload,
+        },
+      ],
+    };
+
+    try {
+      await _dio.post('$_apiUrl/messages', data: body);
+    } catch (e) {
+      debugPrint('Failed to send message: $e');
+      rethrow;
+    }
   }
 
   /// Subscribe to another user's online/offline status

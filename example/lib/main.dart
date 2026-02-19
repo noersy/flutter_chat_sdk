@@ -33,6 +33,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
   );
   final _usernameController = TextEditingController(text: 'User');
   final _wsUrlController = TextEditingController(text: 'http://localhost:8082');
+  final _apiUrlController = TextEditingController(text: 'http://localhost:3000');
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +46,10 @@ class _ConnectionPageState extends State<ConnectionPage> {
             TextField(
               controller: _wsUrlController,
               decoration: const InputDecoration(labelText: 'WebSocket URL'),
+            ),
+            TextField(
+              controller: _apiUrlController,
+              decoration: const InputDecoration(labelText: 'API URL (HTTP)'),
             ),
             TextField(
               controller: _userIdController,
@@ -62,6 +67,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
                   MaterialPageRoute(
                     builder: (context) => ChatPage(
                       wsUrl: _wsUrlController.text,
+                      apiUrl: _apiUrlController.text,
                       userId: _userIdController.text,
                       username: _usernameController.text,
                     ),
@@ -79,10 +85,17 @@ class _ConnectionPageState extends State<ConnectionPage> {
 
 class ChatPage extends StatefulWidget {
   final String wsUrl;
+  final String apiUrl;
   final String userId;
   final String username;
 
-  const ChatPage({super.key, required this.wsUrl, required this.userId, required this.username});
+  const ChatPage({
+    super.key,
+    required this.wsUrl,
+    required this.apiUrl,
+    required this.userId,
+    required this.username,
+  });
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -104,15 +117,16 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _init() async {
-    await _client.init(wsUrl: widget.wsUrl, userId: widget.userId, username: widget.username);
+    await _client.init(
+      wsUrl: widget.wsUrl,
+      apiUrl: widget.apiUrl,
+      userId: widget.userId,
+      username: widget.username,
+    );
 
-    // Listen for authentication before joining
-    _client.authStream.listen((isAuthenticated) {
-      if (isAuthenticated) {
-        debugPrint('✅ Authenticated, joining room...');
-        _joinRoom(_currentRoomId);
-      }
-    });
+    // No more auth delay, join immediately
+    debugPrint('✅ Initialized, joining room...');
+    _joinRoom(_currentRoomId);
 
     _client.messageStream.listen((message) {
       if (message is Map<String, dynamic> && message['room_id'] == _currentRoomId) {

@@ -98,13 +98,9 @@ class WebSocketService {
   Stream<MessageStatusEvent> get messageStatusStream => _messageStatusController.stream;
   Stream<RoomEvent> get roomEventStream => _roomEventController.stream;
 
-  final StreamController<bool> _authController = StreamController<bool>.broadcast();
-  Stream<bool> get authStream => _authController.stream;
-
   /// Connect using Socket.IO protocol.
   /// [url] should be http(s)://host:port (e.g. "http://localhost:8080")
-  /// [userId] and [username] are sent via the `authenticate` event after connect.
-  void connect(String url, String userId, String username) {
+  void connect(String url) {
     _disconnect();
 
     debugPrint('Connecting to Socket.IO at: $url/socket.io/');
@@ -118,13 +114,7 @@ class WebSocketService {
     );
 
     _socket!.onConnect((_) {
-      debugPrint('Socket.IO connected, authenticating...');
-      _socket!.emit('authenticate', {'user_id': userId, 'username': username});
-    });
-
-    _socket!.on('authenticated', (data) {
-      debugPrint('Socket.IO authenticated: $data');
-      _authController.add(true);
+      debugPrint('Socket.IO connected');
     });
 
     _socket!.on('message', (data) {
@@ -145,10 +135,6 @@ class WebSocketService {
       } catch (e) {
         debugPrint('WS: Could not parse message: $e');
       }
-    });
-
-    _socket!.on('message_ack', (data) {
-      // Acknowledgement — no action needed in SDK
     });
 
     _socket!.on('user_online', (data) {
@@ -245,7 +231,7 @@ class WebSocketService {
     _statusController.close();
     _messageStatusController.close();
     _roomEventController.close();
-    _authController.close();
+    _roomEventController.close();
   }
 
   /// Safely converts socket.io event data to `Map<String, dynamic>`.
