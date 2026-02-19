@@ -105,6 +105,7 @@ class _ChatPageState extends State<ChatPage> {
   final ChatClient _client = ChatClient();
   final _roomController = TextEditingController(text: 'general');
   final _messageController = TextEditingController();
+  final FocusNode _messageFocusNode = FocusNode();
 
   String _currentRoomId = 'general';
   final List<Map<String, dynamic>> _messages = [];
@@ -224,15 +225,24 @@ class _ChatPageState extends State<ChatPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined room: $roomId')));
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     if (_messageController.text.isEmpty) return;
 
-    _client.sendMessage({
-      'room_id': _currentRoomId,
-      'content': _messageController.text,
-      'type': 'text',
-    });
-    _messageController.clear();
+    try {
+      await _client.sendMessage({
+        'room_id': _currentRoomId,
+        'content': _messageController.text,
+        'type': 'text',
+      });
+      _messageController.clear();
+      _messageFocusNode.requestFocus();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send message: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   void _sendTransactionData() {
@@ -306,6 +316,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _client.disconnect();
+    _messageFocusNode.dispose();
     super.dispose();
   }
 
@@ -495,6 +506,8 @@ class _ChatPageState extends State<ChatPage> {
                 Expanded(
                   child: TextField(
                     controller: _messageController,
+                    focusNode: _messageFocusNode,
+                    autofocus: true,
                     decoration: const InputDecoration(labelText: 'Message'),
                     onSubmitted: (_) => _sendMessage(),
                   ),
