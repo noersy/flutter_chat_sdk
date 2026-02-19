@@ -108,7 +108,9 @@ class _ChatPageState extends State<ChatPage> {
 
   String _currentRoomId = 'general';
   final List<Map<String, dynamic>> _messages = [];
-  final Map<String, UserStatusEvent> _userStatuses = {};
+
+  // Track online users manually from presence events
+  final Map<String, Map<String, dynamic>> _onlineUsers = {};
 
   @override
   void initState() {
@@ -133,18 +135,46 @@ class _ChatPageState extends State<ChatPage> {
         setState(() {
           _messages.add(message);
         });
-
-        // Auto-subscribe to status of sender
-        final userId = message['user_id'] as String?;
-        if (userId != null && userId != widget.userId && !_userStatuses.containsKey(userId)) {
-          _client.subscribeStatus(userId);
-        }
       }
     });
 
-    _client.userStatusStream.listen((event) {
+    // Listen to presence events
+    _client.presenceStream.listen((event) {
+      // presence logic
       setState(() {
-        _userStatuses[event.userId] = event;
+        if (event.type == 'sync') {
+          _onlineUsers.clear();
+          for (var member in event.members) {
+            if (member is Map<String, dynamic>) {
+              final uid = member['user_id']?.toString() ?? 'unknown';
+              _onlineUsers[uid] = member;
+            }
+          }
+        } else if (event.type == 'join') {
+          final member = event.member;
+          if (member != null) {
+            final uid = member['user_id']?.toString() ?? 'unknown';
+            _onlineUsers[uid] = member;
+
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('${member['username'] ?? uid} joined')));
+            }
+          }
+        } else if (event.type == 'leave') {
+          final member = event.member;
+          if (member != null) {
+            final uid = member['user_id']?.toString() ?? 'unknown';
+            _onlineUsers.remove(uid);
+
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('${member['username'] ?? uid} left')));
+            }
+          }
+        }
       });
     });
 
@@ -164,71 +194,32 @@ class _ChatPageState extends State<ChatPage> {
         }
       }
     });
-
-    // Listen for room membership events
-    _client.roomEventStream.listen((event) {
-      if (event.roomId != _currentRoomId) return;
-
-      if (event.type == 'room_users') {
-        setState(() {
-          for (final uid in event.memberIds) {
-            // Add placeholder status if not exists
-            if (!_userStatuses.containsKey(uid)) {
-              _userStatuses[uid] = UserStatusEvent(
-                userId: uid,
-                username: 'User $uid',
-                isOnline: false,
-              );
-              // Subscribe to get real status & username
-              _client.subscribeStatus(uid);
-            }
-          }
-        });
-      } else if (event.type == 'user_joined') {
-        final uid = event.userId;
-        if (uid != null) {
-          setState(() {
-            _userStatuses[uid] = UserStatusEvent(
-              userId: uid,
-              username: event.username ?? 'User $uid',
-              isOnline: true, // Just joined, so online
-            );
-          });
-          _client.subscribeStatus(uid);
-          if (mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('${event.username ?? uid} joined')));
-          }
-        }
-      } else if (event.type == 'user_left') {
-        final uid = event.userId;
-        if (uid != null) {
-          setState(() {
-            _userStatuses.remove(uid);
-            _client.unsubscribeStatus(uid);
-          });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$uid left')));
-          }
-        }
-      }
-    });
-
-    // Join the default room
-    // _joinRoom(_currentRoomId); // Moved to authStream listener
   }
 
   void _joinRoom(String roomId) {
     if (_currentRoomId != roomId) {
       _client.leaveRoom(_currentRoomId);
+      // Leave old presence
+      _client.leavePresence(_currentRoomId, {
+        'user_id': widget.userId,
+        'username': widget.username,
+      });
+
       setState(() {
         _messages.clear();
-        _userStatuses.clear(); // Clear members when switching rooms
+        _onlineUsers.clear(); // Clear members when switching rooms
         _currentRoomId = roomId;
       });
     }
+
     _client.joinRoom(roomId);
+
+    // Join new presence
+    _client.joinPresence(roomId, {
+      'user_id': widget.userId,
+      'username': widget.username,
+      'entered_at': DateTime.now().toIso8601String(),
+    });
 
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined room: $roomId')));
   }
@@ -326,8 +317,8 @@ class _ChatPageState extends State<ChatPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Chat: $_currentRoomId'),
-            if (_userStatuses.isNotEmpty)
-              Text(_getStatusSummary(), style: const TextStyle(fontSize: 12)),
+            if (_onlineUsers.isNotEmpty)
+              Text('${_onlineUsers.length} Online', style: const TextStyle(fontSize: 12)),
           ],
         ),
         actions: [
@@ -358,26 +349,18 @@ class _ChatPageState extends State<ChatPage> {
             const DrawerHeader(child: Center(child: Text("Room Members"))),
             Expanded(
               child: ListView.builder(
-                itemCount: _userStatuses.length,
+                itemCount: _onlineUsers.length,
                 itemBuilder: (context, index) {
-                  final user = _userStatuses.values.elementAt(index);
-                  final isMe = user.userId == widget.userId;
+                  final user = _onlineUsers.values.elementAt(index);
+                  final isMe = user['user_id'] == widget.userId;
+                  final username = user['username'] ?? 'Unknown';
+
                   return ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: user.isOnline ? Colors.green : Colors.grey,
-                      radius: 5,
-                    ),
-                    title: Text(isMe ? '${user.username} (You)' : user.username),
-                    subtitle: Text(
-                      user.isOnline
-                          ? 'Online'
-                          : (user.lastSeen != null
-                                ? 'Last seen: ${_formatLastSeen(user.lastSeen!)}'
-                                : 'Offline'),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: user.isOnline ? Colors.green : Colors.grey,
-                      ),
+                    leading: const CircleAvatar(backgroundColor: Colors.green, radius: 5),
+                    title: Text(isMe ? '$username (You)' : username),
+                    subtitle: const Text(
+                      'Online',
+                      style: TextStyle(fontSize: 12, color: Colors.green),
                     ),
                   );
                 },
@@ -523,20 +506,6 @@ class _ChatPageState extends State<ChatPage> {
         ],
       ),
     );
-  }
-
-  String _getStatusSummary() {
-    final onlineCount = _userStatuses.values.where((u) => u.isOnline).length;
-    final totalCount = _userStatuses.length;
-    return '$onlineCount / $totalCount Online';
-  }
-
-  String _formatLastSeen(DateTime lastSeen) {
-    final diff = DateTime.now().difference(lastSeen);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
   }
 
   String _formatTime(DateTime time) {

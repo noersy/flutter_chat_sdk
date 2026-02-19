@@ -6,8 +6,7 @@ import 'package:uuid/uuid.dart';
 import 'core/websocket_service.dart';
 import 'domain/entities/user.dart';
 
-export 'core/websocket_service.dart'
-    show UserStatusEvent, MessageStatusEvent, StatusUpdate, RoomEvent;
+export 'core/websocket_service.dart' show PresenceEvent;
 
 class ChatClient {
   static final ChatClient _instance = ChatClient._internal();
@@ -32,12 +31,8 @@ class ChatClient {
   final _messagesController = StreamController<dynamic>.broadcast();
   Stream<dynamic> get messageStream => _messagesController.stream;
 
-  Stream<UserStatusEvent> get userStatusStream => _webSocketService.statusStream;
-
-  Stream<MessageStatusEvent> get statusUpdateStream => _messageStatusController.stream;
-  final _messageStatusController = StreamController<MessageStatusEvent>.broadcast();
-
-  Stream<RoomEvent> get roomEventStream => _webSocketService.roomEventStream;
+  // Presence Stream
+  Stream<PresenceEvent> get presenceStream => _webSocketService.presenceStream;
 
   bool _initialized = false;
   String? _wsUrl;
@@ -60,10 +55,6 @@ class ChatClient {
 
     _webSocketService.messageStream.listen((message) {
       _messagesController.add(message);
-    });
-
-    _webSocketService.messageStatusStream.listen((status) {
-      _messageStatusController.add(status);
     });
 
     if (userId != null && username != null) {
@@ -110,16 +101,30 @@ class ChatClient {
     _initialized = false;
   }
 
-  /// Join a room
+  /// Join a room (normal socket join)
   void joinRoom(String roomId) {
     _requireAuth();
     _webSocketService.emit('join', {'room_id': roomId});
   }
 
-  /// Leave a room
+  /// Leave a room (normal socket leave)
+  /// Note: Support for this on backend might be missing or optional.
   void leaveRoom(String roomId) {
     _requireAuth();
     _webSocketService.emit('leave', {'room_id': roomId});
+  }
+
+  /// Join presence channel for a room/topic
+  /// [payload]: additional info (e.g. user details) to share
+  void joinPresence(String roomId, Map<String, dynamic> payload) {
+    _requireAuth();
+    _webSocketService.emit('presence_subscribe', {'room_id': roomId, 'payload': payload});
+  }
+
+  /// Leave presence channel
+  void leavePresence(String roomId, Map<String, dynamic> payload) {
+    _requireAuth();
+    _webSocketService.emit('presence_unsubscribe', {'room_id': roomId, 'payload': payload});
   }
 
   /// Send a message via HTTP POST.
@@ -170,18 +175,6 @@ class ChatClient {
     }
   }
 
-  /// Subscribe to another user's online/offline status
-  void subscribeStatus(String targetUserId) {
-    _requireAuth();
-    _webSocketService.emit('subscribe_status', {'target_user_id': targetUserId});
-  }
-
-  /// Unsubscribe from another user's status
-  void unsubscribeStatus(String targetUserId) {
-    _requireAuth();
-    _webSocketService.emit('unsubscribe_status', {'target_user_id': targetUserId});
-  }
-
   /// Listen to a custom event.
   /// [event] is the name of the event to listen to.
   /// [handler] is the function to call when the event is received.
@@ -217,6 +210,5 @@ class ChatClient {
     _webSocketService.dispose();
     _userController.close();
     _messagesController.close();
-    _messageStatusController.close();
   }
 }

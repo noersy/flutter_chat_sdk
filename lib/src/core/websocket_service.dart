@@ -3,83 +3,30 @@ import 'package:flutter/foundation.dart';
 // ignore: library_prefixes
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
-/// Represents a user's online status change event
-class UserStatusEvent {
-  final String userId;
-  final String username;
-  final bool isOnline;
-  final DateTime? lastSeen;
+/// Represents a presence event from the backend
+class PresenceEvent {
+  final String type; // join, leave, sync
+  final String topic;
+  final List<dynamic> members; // For sync
+  final Map<String, dynamic>? member; // For join/leave
 
-  const UserStatusEvent({
-    required this.userId,
-    required this.username,
-    required this.isOnline,
-    this.lastSeen,
-  });
-
-  factory UserStatusEvent.fromJson(Map<String, dynamic> json) {
-    return UserStatusEvent(
-      userId: json['user_id'] as String,
-      username: json['username'] as String? ?? 'Unknown',
-      isOnline: json['is_online'] ?? (json['type'] == 'user_online'),
-      lastSeen: json['last_seen'] != null ? DateTime.tryParse(json['last_seen']) : null,
-    );
-  }
-}
-
-/// Represents a batch of message status updates
-class MessageStatusEvent {
-  final String roomId;
-  final List<StatusUpdate> updates;
-
-  const MessageStatusEvent({required this.roomId, required this.updates});
-
-  factory MessageStatusEvent.fromJson(Map<String, dynamic> json) {
-    final updatesJson = json['updates'] as List<dynamic>? ?? [];
-    return MessageStatusEvent(
-      roomId: json['room_id'] as String? ?? '',
-      updates: updatesJson
-          .map(
-            (u) =>
-                StatusUpdate(messageId: u['message_id'] as String, status: u['status'] as String),
-          )
-          .toList(),
-    );
-  }
-}
-
-/// Single message status update item
-class StatusUpdate {
-  final String messageId;
-  final String status; // sent, delivered, read
-
-  const StatusUpdate({required this.messageId, required this.status});
-}
-
-/// Event for room membership changes
-class RoomEvent {
-  final String type; // user_joined, user_left, room_users
-  final String roomId;
-  final String? userId;
-  final String? username;
-  final List<String> memberIds;
-
-  const RoomEvent({
+  const PresenceEvent({
     required this.type,
-    required this.roomId,
-    this.userId,
-    this.username,
-    this.memberIds = const [],
+    required this.topic,
+    this.members = const [],
+    this.member,
   });
 
-  factory RoomEvent.fromJson(Map<String, dynamic> json) {
-    return RoomEvent(
-      type: json['type'] as String? ?? '',
-      roomId: json['room_id'] as String? ?? '',
-      userId: json['user_id'] as String?,
-      username: json['username'] as String?,
-      memberIds: (json['users'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-    );
+  factory PresenceEvent.fromJoin(String topic, Map<String, dynamic> payload) {
+    return PresenceEvent(type: 'join', topic: topic, member: payload);
+  }
+
+  factory PresenceEvent.fromLeave(String topic, Map<String, dynamic> payload) {
+    return PresenceEvent(type: 'leave', topic: topic, member: payload);
+  }
+
+  factory PresenceEvent.fromSync(String topic, List<dynamic> members) {
+    return PresenceEvent(type: 'sync', topic: topic, members: members);
   }
 }
 
@@ -87,16 +34,11 @@ class WebSocketService {
   IO.Socket? _socket;
 
   final StreamController<dynamic> _messageController = StreamController<dynamic>.broadcast();
-  final StreamController<UserStatusEvent> _statusController =
-      StreamController<UserStatusEvent>.broadcast();
-  final StreamController<MessageStatusEvent> _messageStatusController =
-      StreamController<MessageStatusEvent>.broadcast();
-  final StreamController<RoomEvent> _roomEventController = StreamController<RoomEvent>.broadcast();
+  final StreamController<PresenceEvent> _presenceController =
+      StreamController<PresenceEvent>.broadcast();
 
   Stream<dynamic> get messageStream => _messageController.stream;
-  Stream<UserStatusEvent> get statusStream => _statusController.stream;
-  Stream<MessageStatusEvent> get messageStatusStream => _messageStatusController.stream;
-  Stream<RoomEvent> get roomEventStream => _roomEventController.stream;
+  Stream<PresenceEvent> get presenceStream => _presenceController.stream;
 
   /// Connect using Socket.IO protocol.
   /// [url] should be http(s)://host:port (e.g. "http://localhost:8080")
@@ -137,43 +79,25 @@ class WebSocketService {
       }
     });
 
-    _socket!.on('user_online', (data) {
+    // --- Presence Events ---
+
+    _socket!.on('presence_join', (data) {
       final json = _toMap(data);
       if (json != null) {
-        json['type'] = 'user_online';
-        _statusController.add(UserStatusEvent.fromJson(json));
+        _presenceController.add(PresenceEvent.fromJoin('unknown', json));
       }
     });
 
-    _socket!.on('user_offline', (data) {
+    _socket!.on('presence_leave', (data) {
       final json = _toMap(data);
       if (json != null) {
-        json['type'] = 'user_offline';
-        _statusController.add(UserStatusEvent.fromJson(json));
+        _presenceController.add(PresenceEvent.fromLeave('unknown', json));
       }
     });
 
-    _socket!.on('room_users', (data) {
-      final json = _toMap(data);
-      if (json != null) {
-        json['type'] = 'room_users';
-        _roomEventController.add(RoomEvent.fromJson(json));
-      }
-    });
-
-    _socket!.on('user_joined', (data) {
-      final json = _toMap(data);
-      if (json != null) {
-        json['type'] = 'user_joined';
-        _roomEventController.add(RoomEvent.fromJson(json));
-      }
-    });
-
-    _socket!.on('user_left', (data) {
-      final json = _toMap(data);
-      if (json != null) {
-        json['type'] = 'user_left';
-        _roomEventController.add(RoomEvent.fromJson(json));
+    _socket!.on('presence_sync', (data) {
+      if (data is List) {
+        _presenceController.add(PresenceEvent.fromSync('unknown', data));
       }
     });
 
@@ -199,8 +123,6 @@ class WebSocketService {
         debugPrint('⏱️ Socket.IO connection timeout after 5 seconds');
       }
     });
-
-    // _socket!.connect(); // Auto-connect is enabled by default
   }
 
   /// Emit a socket.io event with a data payload.
@@ -228,14 +150,10 @@ class WebSocketService {
   void dispose() {
     _disconnect();
     _messageController.close();
-    _statusController.close();
-    _messageStatusController.close();
-    _roomEventController.close();
-    _roomEventController.close();
+    _presenceController.close();
   }
 
   /// Safely converts socket.io event data to `Map<String, dynamic>`.
-  /// The socket_io_client may deliver data as a Map or as a List with one Map.
   Map<String, dynamic>? _toMap(dynamic data) {
     if (data is Map<String, dynamic>) return data;
     if (data is Map) return Map<String, dynamic>.from(data);
