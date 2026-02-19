@@ -32,7 +32,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
     text: 'user-${DateTime.now().millisecondsSinceEpoch}',
   );
   final _usernameController = TextEditingController(text: 'User');
-  final _wsUrlController = TextEditingController(text: 'http://localhost:8082');
+  final _wsUrlController = TextEditingController(text: 'http://localhost:3000');
   final _apiUrlController = TextEditingController(text: 'http://localhost:3000');
 
   @override
