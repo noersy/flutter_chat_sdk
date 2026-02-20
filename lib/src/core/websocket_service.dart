@@ -135,9 +135,9 @@ class WebSocketService {
     _socket?.on(event, handler);
   }
 
-  /// Remove a custom event listener.
-  void off(String event) {
-    _socket?.off(event);
+  /// Remove a custom event listener. Optionally provide the specific handler to remove.
+  void off(String event, [Function(dynamic)? handler]) {
+    _socket?.off(event, handler);
   }
 
   void _disconnect() {

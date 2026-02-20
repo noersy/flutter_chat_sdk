@@ -186,10 +186,10 @@ class ChatClient {
     _webSocketService.on(event, handler);
   }
 
-  /// Remove a custom event listener.
-  void off(String event) {
+  /// Remove a custom event listener. Optionally provide the specific handler to remove.
+  void off(String event, [Function(dynamic)? handler]) {
     if (!_initialized) return;
-    _webSocketService.off(event);
+    _webSocketService.off(event, handler);
   }
 
   Future<void> _restoreSession() async {
