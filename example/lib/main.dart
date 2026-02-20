@@ -113,6 +113,10 @@ class _ChatPageState extends State<ChatPage> {
   // Track online users manually from presence events
   final Map<String, Map<String, dynamic>> _onlineUsers = {};
 
+  // Stream subscriptions for cleanup
+  StreamSubscription? _messageSubscription;
+  StreamSubscription? _presenceSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -127,11 +131,9 @@ class _ChatPageState extends State<ChatPage> {
       username: widget.username,
     );
 
-    // No more auth delay, join immediately
-    debugPrint('✅ Initialized, joining room...');
-    _joinRoom(_currentRoomId);
-
-    _client.messageStream.listen((message) {
+    // Setup listeners BEFORE joining room to avoid race condition
+    _messageSubscription = _client.messageStream.listen((message) {
+      if (!mounted) return;
       if (message is Map<String, dynamic> && message['room_id'] == _currentRoomId) {
         setState(() {
           _messages.add(message);
@@ -140,8 +142,8 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     // Listen to presence events
-    _client.presenceStream.listen((event) {
-      // presence logic
+    _presenceSubscription = _client.presenceStream.listen((event) {
+      if (!mounted) return;
       setState(() {
         if (event.type == 'sync') {
           _onlineUsers.clear();
@@ -178,6 +180,10 @@ class _ChatPageState extends State<ChatPage> {
         }
       });
     });
+
+    // Now join room after listeners are ready
+    debugPrint('✅ Initialized, joining room...');
+    _joinRoom(_currentRoomId);
 
     // Listen to custom 'system_announcement' event
     _client.on('system_announcement', (data) {
@@ -315,6 +321,8 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _messageSubscription?.cancel();
+    _presenceSubscription?.cancel();
     _client.disconnect();
     _messageFocusNode.dispose();
     super.dispose();
