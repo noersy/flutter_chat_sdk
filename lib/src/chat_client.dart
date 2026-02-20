@@ -104,6 +104,7 @@ class ChatClient {
   /// Join a room (normal socket join)
   void joinRoom(String roomId) {
     _requireAuth();
+    debugPrint('[ChatSDK] joinRoom: $roomId');
     _webSocketService.emit('join', {'room_id': roomId});
   }
 
@@ -118,6 +119,7 @@ class ChatClient {
   /// [payload]: additional info (e.g. user details) to share
   void joinPresence(String roomId, Map<String, dynamic> payload) {
     _requireAuth();
+    debugPrint('[ChatSDK] joinPresence: room=$roomId, payload=$payload');
     _webSocketService.emit('presence_subscribe', {'room_id': roomId, 'payload': payload});
   }
 

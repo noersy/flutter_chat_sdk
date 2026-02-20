@@ -83,6 +83,7 @@ class WebSocketService {
     // --- Presence Events ---
 
     _socket!.on('presence_join', (data) {
+      debugPrint('[ChatSDK] presence_join raw: $data');
       final json = _toMap(data);
       if (json != null) {
         _presenceController.add(PresenceEvent.fromJoin('unknown', json));
@@ -97,7 +98,7 @@ class WebSocketService {
     });
 
     _socket!.on('presence_sync', (data) {
-      debugPrint('WS presence_sync raw: $data (${data.runtimeType})');
+      debugPrint('[ChatSDK] presence_sync raw: $data (${data.runtimeType})');
       List<dynamic> listData = [];
       if (data is List) {
         listData = data;
@@ -145,6 +146,7 @@ class WebSocketService {
 
   /// Listen to a custom event.
   void on(String event, Function(dynamic) handler) {
+    debugPrint('[ChatSDK] on: registering listener for event "$event"');
     _socket?.on(event, handler);
   }
 
