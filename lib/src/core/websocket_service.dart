@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 // ignore: library_prefixes
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -96,9 +97,21 @@ class WebSocketService {
     });
 
     _socket!.on('presence_sync', (data) {
+      debugPrint('WS presence_sync raw: $data (${data.runtimeType})');
+      List<dynamic> listData = [];
       if (data is List) {
-        _presenceController.add(PresenceEvent.fromSync('unknown', data));
+        listData = data;
+      } else if (data is String) {
+        try {
+          final decoded = jsonDecode(data);
+          if (decoded is List) listData = decoded;
+        } catch (_) {}
+      } else if (data is Map && data.containsKey('data')) {
+        final inner = data['data'];
+        if (inner is List) listData = inner;
       }
+
+      _presenceController.add(PresenceEvent.fromSync('unknown', listData));
     });
 
     _socket!.on('error', (data) {
