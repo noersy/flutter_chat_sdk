@@ -57,7 +57,12 @@ class WebSocketService {
     );
 
     _socket!.onConnect((_) {
-      debugPrint('Socket.IO connected');
+      debugPrint('[ChatSDK] Socket.IO connected');
+    });
+
+    // Catch-all: log EVERY event from the server for debugging
+    _socket!.onAny((event, data) {
+      debugPrint('[ChatSDK] onAny event="$event" data=$data');
     });
 
     _socket!.on('message', (data) {
