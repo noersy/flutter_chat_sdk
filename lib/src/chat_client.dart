@@ -25,6 +25,9 @@ class ChatClient {
   final _storage = const FlutterSecureStorage();
   static const _storageUserKey = 'chat_sdk_user_id';
   static const _storageUsernameKey = 'chat_sdk_username';
+  static const _storageTokenKey = 'chat_sdk_token';
+
+  String? _currentToken;
 
   // Streams
   final _userController = StreamController<User?>.broadcast();
@@ -47,11 +50,13 @@ class ChatClient {
   /// Initialize the SDK.
   /// [wsUrl]: Socket.IO server URL (e.g. "http://localhost:8080")
   /// [apiUrl]: HTTP API URL (e.g. "http://localhost:8080")
+  /// [token]: optional JWT token for immediate connection
   Future<void> init({
     required String wsUrl,
     required String apiUrl,
     String? userId,
     String? username,
+    String? token,
   }) async {
     if (_initialized) return;
 
@@ -63,8 +68,8 @@ class ChatClient {
       _messagesController.add(message);
     });
 
-    if (userId != null && username != null) {
-      await connect(userId, username);
+    if (userId != null && username != null && token != null) {
+      await connect(userId: userId, username: username, token: token);
     } else {
       await _restoreSession();
     }
@@ -73,7 +78,11 @@ class ChatClient {
   }
 
   /// Connect to the Socket.IO server and authenticate.
-  Future<void> connect(String userId, String username) async {
+  Future<void> connect({
+    required String userId,
+    required String username,
+    required String token,
+  }) async {
     _currentUser = User(
       id: userId,
       username: username,
@@ -82,26 +91,39 @@ class ChatClient {
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
+    _currentToken = token;
     _userController.add(_currentUser);
 
     await _storage.write(key: _storageUserKey, value: userId);
     await _storage.write(key: _storageUsernameKey, value: username);
+    await _storage.write(key: _storageTokenKey, value: token);
 
-    _connectSocketIO();
+    // Set Dio Authorization interceptor
+    _dio.interceptors.clear();
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) {
+        options.headers['Authorization'] = 'Bearer $_currentToken';
+        handler.next(options);
+      },
+    ));
+
+    _connectSocketIO(token);
   }
 
-  void _connectSocketIO() {
+  void _connectSocketIO(String token) {
     if (_currentUser == null || _wsUrl == null) return;
     debugPrint('Connecting to Socket.IO: $_wsUrl');
     // WebSocketService handles connection
-    _webSocketService.connect(_wsUrl!);
+    _webSocketService.connect(_wsUrl!, token);
   }
 
   /// Logout / Disconnect
   Future<void> disconnect() async {
     await _storage.delete(key: _storageUserKey);
     await _storage.delete(key: _storageUsernameKey);
+    await _storage.delete(key: _storageTokenKey);
     _currentUser = null;
+    _currentToken = null;
     _userController.add(null);
     _webSocketService.dispose();
     _initialized = false;
@@ -193,7 +215,6 @@ class ChatClient {
     _webSocketService.emit('message_unsend', {
       'message_id': messageId,
       'room_id':    roomId,
-      'user_id':    _currentUser!.id,
     });
   }
 
@@ -207,8 +228,6 @@ class ChatClient {
     _webSocketService.emit('message_read', {
       'message_id': messageId,
       'room_id':    roomId,
-      'user_id':    _currentUser!.id,
-      'username':   _currentUser!.username,
     });
   }
 
@@ -260,8 +279,9 @@ class ChatClient {
   Future<void> _restoreSession() async {
     final userId = await _storage.read(key: _storageUserKey);
     final username = await _storage.read(key: _storageUsernameKey);
-    if (userId != null && username != null) {
-      await connect(userId, username);
+    final token = await _storage.read(key: _storageTokenKey);
+    if (userId != null && username != null && token != null) {
+      await connect(userId: userId, username: username, token: token);
     }
   }
 

@@ -51,7 +51,8 @@ class WebSocketService {
 
   /// Connect using Socket.IO protocol.
   /// [url] should be http(s)://host:port (e.g. "http://localhost:8080")
-  void connect(String url) {
+  /// [token] is the JWT token for authentication.
+  void connect(String url, String token) {
     _disconnect();
 
     debugPrint('Connecting to Socket.IO at: $url/socket.io/');
@@ -61,6 +62,7 @@ class WebSocketService {
           .setPath('/socket.io/')
           .setTransports(['polling', 'websocket'])
           .enableForceNewConnection()
+          .setAuth({'token': token})
           .build(),
     );
 
