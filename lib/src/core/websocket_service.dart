@@ -96,19 +96,23 @@ class WebSocketService {
     });
 
     // --- Presence Events ---
+    // Backend always includes `room_id` in the member payload so clients can
+    // identify which room the event belongs to without a separate lookup.
 
     _socket!.on('presence_join', (data) {
       debugPrint('[ChatSDK] presence_join raw: $data');
       final json = _toMap(data);
       if (json != null) {
-        _presenceController.add(PresenceEvent.fromJoin('unknown', json));
+        final roomId = json['room_id'] as String? ?? 'unknown';
+        _presenceController.add(PresenceEvent.fromJoin(roomId, json));
       }
     });
 
     _socket!.on('presence_leave', (data) {
       final json = _toMap(data);
       if (json != null) {
-        _presenceController.add(PresenceEvent.fromLeave('unknown', json));
+        final roomId = json['room_id'] as String? ?? 'unknown';
+        _presenceController.add(PresenceEvent.fromLeave(roomId, json));
       }
     });
 
@@ -127,7 +131,16 @@ class WebSocketService {
         if (inner is List) listData = inner;
       }
 
-      _presenceController.add(PresenceEvent.fromSync('unknown', listData));
+      // Derive room_id from the first member's payload if available
+      String roomId = 'unknown';
+      if (listData.isNotEmpty) {
+        final first = listData.first;
+        if (first is Map) {
+          roomId = (first['room_id'] as String?) ?? 'unknown';
+        }
+      }
+
+      _presenceController.add(PresenceEvent.fromSync(roomId, listData));
     });
 
     _socket!.on('message_unsent', (data) {
