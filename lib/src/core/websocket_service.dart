@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../domain/entities/unsend_event.dart';
 import '../domain/entities/read_receipt_event.dart';
+import '../domain/entities/typing_event.dart';
 
 /// Represents a presence event from the backend
 class PresenceEvent {
@@ -43,11 +44,20 @@ class WebSocketService {
       StreamController<UnsendEvent>.broadcast();
   final StreamController<ReadReceiptEvent> _readReceiptController =
       StreamController<ReadReceiptEvent>.broadcast();
+  final StreamController<TypingEvent> _typingController =
+      StreamController<TypingEvent>.broadcast();
+  final StreamController<bool> _connectionController =
+      StreamController<bool>.broadcast();
 
   Stream<dynamic> get messageStream => _messageController.stream;
   Stream<PresenceEvent> get presenceStream => _presenceController.stream;
   Stream<UnsendEvent> get unsendStream => _unsendController.stream;
   Stream<ReadReceiptEvent> get readReceiptStream => _readReceiptController.stream;
+  Stream<TypingEvent> get typingStream => _typingController.stream;
+  /// Emits true on connect/reconnect, false on disconnect.
+  Stream<bool> get connectionStream => _connectionController.stream;
+
+  bool get isConnected => _socket?.connected ?? false;
 
   /// Connect using Socket.IO protocol.
   /// [url] should be http(s)://host:port (e.g. "http://localhost:8080")
@@ -68,6 +78,7 @@ class WebSocketService {
 
     _socket!.onConnect((_) {
       debugPrint('[ChatSDK] Socket.IO connected');
+      _connectionController.add(true);
     });
 
     // Catch-all: log EVERY event from the server for debugging
@@ -157,12 +168,27 @@ class WebSocketService {
       }
     });
 
+    _socket!.on('typing_start', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        _typingController.add(TypingEvent.fromJson(json, isTyping: true));
+      }
+    });
+
+    _socket!.on('typing_stop', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        _typingController.add(TypingEvent.fromJson(json, isTyping: false));
+      }
+    });
+
     _socket!.on('error', (data) {
       debugPrint('Socket.IO error: $data');
     });
 
     _socket!.onDisconnect((_) {
       debugPrint('Socket.IO disconnected');
+      _connectionController.add(false);
     });
 
     _socket!.onConnectError((err) {
@@ -210,6 +236,8 @@ class WebSocketService {
     _presenceController.close();
     _unsendController.close();
     _readReceiptController.close();
+    _typingController.close();
+    _connectionController.close();
   }
 
   /// Safely converts socket.io event data to `Map<String, dynamic>`.

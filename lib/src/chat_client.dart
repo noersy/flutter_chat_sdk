@@ -7,8 +7,10 @@ import 'core/websocket_service.dart';
 import 'domain/entities/user.dart';
 import 'domain/entities/unsend_event.dart';
 import 'domain/entities/read_receipt_event.dart';
+import 'domain/entities/typing_event.dart';
 
 export 'core/websocket_service.dart' show PresenceEvent;
+export 'domain/entities/typing_event.dart';
 
 class ChatClient {
   static final ChatClient _instance = ChatClient._internal();
@@ -43,6 +45,23 @@ class ChatClient {
   Stream<UnsendEvent> get unsendStream => _webSocketService.unsendStream;
   Stream<ReadReceiptEvent> get readReceiptStream => _webSocketService.readReceiptStream;
 
+  // Typing indicator stream
+  Stream<TypingEvent> get typingStream => _webSocketService.typingStream;
+
+  // Connection state stream (true = connected, false = disconnected)
+  Stream<bool> get connectionStream => _webSocketService.connectionStream;
+
+  // --- Offline message queue ---
+  /// Pending messages that failed to send because the socket/HTTP was unavailable.
+  /// Flushed automatically when the connection is restored.
+  final List<Map<String, dynamic>> _offlineQueue = [];
+  StreamSubscription<bool>? _connectionSub;
+
+  // --- Typing debounce ---
+  /// Active debounce timers keyed by room_id. Prevents flooding the server with
+  /// typing_stop events when the user pauses briefly between keystrokes.
+  final Map<String, Timer> _typingTimers = {};
+
   bool _initialized = false;
   String? _wsUrl;
   String? _apiUrl;
@@ -66,6 +85,13 @@ class ChatClient {
 
     _webSocketService.messageStream.listen((message) {
       _messagesController.add(message);
+    });
+
+    // Flush offline queue whenever the socket connects or reconnects
+    _connectionSub = _webSocketService.connectionStream.listen((connected) {
+      if (connected && _offlineQueue.isNotEmpty) {
+        _flushOfflineQueue();
+      }
     });
 
     if (userId != null && username != null && token != null) {
@@ -119,6 +145,11 @@ class ChatClient {
 
   /// Logout / Disconnect
   Future<void> disconnect() async {
+    _cancelAllTypingTimers();
+    _connectionSub?.cancel();
+    _connectionSub = null;
+    _offlineQueue.clear();
+
     await _storage.delete(key: _storageUserKey);
     await _storage.delete(key: _storageUsernameKey);
     await _storage.delete(key: _storageTokenKey);
@@ -163,18 +194,19 @@ class ChatClient {
   }
 
   /// Send a message via HTTP POST.
-  /// Only requires [content] and [roomId] (or [topic]).
-  /// Other fields can be passed via the optional [extraData] Map.
-  Future<void> sendMessage(Map<String, dynamic> messageData) async {
+  ///
+  /// If the connection is currently unavailable (no socket / HTTP unreachable),
+  /// the message is added to an offline queue and sent automatically once the
+  /// connection is restored. The caller receives no exception in that case.
+  ///
+  /// If [allowOfflineQueue] is false the method throws immediately when offline
+  /// instead of queuing (useful for UI that wants to show an explicit error).
+  Future<void> sendMessage(
+    Map<String, dynamic> messageData, {
+    bool allowOfflineQueue = true,
+  }) async {
     _requireAuth();
     if (_apiUrl == null) throw Exception('API URL not set');
-
-    // Prepare payload matching backend expectations
-    // Backend expects: { messages: [ { topic, event, payload } ] }
-    // But for 'message' event, the payload itself is the message data.
-
-    // Important: we need to construct the FULL message object client-side now
-    // because the backend just broadcasts what we send.
 
     final roomId = (messageData['room_id'] ?? messageData['topic']) as String?;
     if (roomId == null) throw Exception('room_id is required');
@@ -195,17 +227,32 @@ class ChatClient {
       'messages': [
         {
           'topic': roomId,
-          'event': 'message', // Standard chat event
+          'event': 'message',
           'payload': fullPayload,
         },
       ],
     };
 
+    // If offline, enqueue for later delivery
+    if (!_webSocketService.isConnected) {
+      if (!allowOfflineQueue) {
+        throw Exception('Cannot send message: not connected');
+      }
+      _offlineQueue.add(body);
+      debugPrint('[ChatSDK] Offline — message queued (queue size: ${_offlineQueue.length})');
+      return;
+    }
+
     try {
       await _dio.post('$_apiUrl/messages', data: body);
     } catch (e) {
-      debugPrint('Failed to send message: $e');
-      rethrow;
+      if (allowOfflineQueue) {
+        _offlineQueue.add(body);
+        debugPrint('[ChatSDK] Send failed — message queued (queue size: ${_offlineQueue.length})');
+      } else {
+        debugPrint('Failed to send message: $e');
+        rethrow;
+      }
     }
   }
 
@@ -260,6 +307,71 @@ class ChatClient {
     } catch (e) {
       debugPrint('[ChatSDK] getRoomHistory error: $e');
       rethrow;
+    }
+  }
+
+  // --- Typing indicator ---
+
+  /// Notify the server that the current user started typing in [roomId].
+  ///
+  /// Repeated calls within [debounceDuration] are coalesced into a single event
+  /// so the server is not flooded on every keystroke. The server also applies
+  /// an 8 s auto-stop, but calling [stopTyping] explicitly is preferred.
+  void startTyping(String roomId, {Duration debounceDuration = const Duration(milliseconds: 500)}) {
+    _requireAuth();
+
+    final existing = _typingTimers[roomId];
+    if (existing == null) {
+      // No active timer — first keystroke in this burst; emit immediately
+      _webSocketService.emit('typing_start', {'room_id': roomId});
+    } else {
+      // Already typing — just reset the debounce timer below
+      existing.cancel();
+    }
+
+    // Schedule automatic stop after user goes idle for [debounceDuration]
+    _typingTimers[roomId] = Timer(debounceDuration, () {
+      _webSocketService.emit('typing_stop', {'room_id': roomId});
+      _typingTimers.remove(roomId);
+    });
+  }
+
+  /// Notify the server that the current user stopped typing in [roomId].
+  /// Call this when the message is sent or the input is cleared.
+  void stopTyping(String roomId) {
+    _requireAuth();
+    _typingTimers.remove(roomId)?.cancel();
+    _webSocketService.emit('typing_stop', {'room_id': roomId});
+  }
+
+  void _cancelAllTypingTimers() {
+    for (final t in _typingTimers.values) { t.cancel(); }
+    _typingTimers.clear();
+  }
+
+  // --- Offline queue ---
+
+  /// Returns a read-only snapshot of the current offline queue length.
+  int get offlineQueueLength => _offlineQueue.length;
+
+  /// Sends all queued messages in order. Called automatically on reconnect.
+  Future<void> _flushOfflineQueue() async {
+    if (_offlineQueue.isEmpty) return;
+    debugPrint('[ChatSDK] Flushing offline queue (${_offlineQueue.length} messages)');
+
+    // Snapshot and clear so new offline messages during flush go to a fresh queue
+    final pending = List<Map<String, dynamic>>.from(_offlineQueue);
+    _offlineQueue.clear();
+
+    for (final body in pending) {
+      try {
+        await _dio.post('$_apiUrl/messages', data: body);
+      } catch (e) {
+        // Re-queue failed messages at the front for the next flush
+        _offlineQueue.insert(0, body);
+        debugPrint('[ChatSDK] Re-queued message after flush failure: $e');
+        break; // Stop on first failure to preserve order
+      }
     }
   }
 
