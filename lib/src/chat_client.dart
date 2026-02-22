@@ -151,10 +151,15 @@ class ChatClient {
     _webSocketService.emit('presence_subscribe', {'room_id': roomId, 'payload': payload});
   }
 
-  /// Leave presence channel
-  void leavePresence(String roomId, Map<String, dynamic> payload) {
+  /// Leave presence channel.
+  /// [payload] is optional — backend will fall back to the payload stored at
+  /// subscribe time if an empty map is sent.
+  void leavePresence(String roomId, [Map<String, dynamic>? payload]) {
     _requireAuth();
-    _webSocketService.emit('presence_unsubscribe', {'room_id': roomId, 'payload': payload});
+    _webSocketService.emit('presence_unsubscribe', {
+      'room_id': roomId,
+      'payload': payload ?? {},
+    });
   }
 
   /// Send a message via HTTP POST.
