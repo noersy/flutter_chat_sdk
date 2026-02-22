@@ -1,143 +1,162 @@
 # Flutter Chat SDK
 
-A comprehensive Flutter package for integrating real-time chat capabilities into your application using Socket.IO.
-
-## Features
-
-- **Real-time Messaging**: Send and receive messages instantly.
-- **Room Management**: Join and leave chat rooms for group or private conversations.
-- **User Status**: Track online/offline status of users.
-- **Message Status**: Support for message delivery status (sent, delivered, read).
-- **Event Handling**: Listen to various events like room changes and user status updates.
-- **Secure Storage**: Automatically manages user session persistence.
+Flutter/Dart package for integrating real-time chat into your app using the `backend-node` server.
 
 ## Installation
 
-Add the following to your `pubspec.yaml` file:
-
 ```yaml
+# pubspec.yaml
 dependencies:
   flutter_chat_sdk:
-    path: ./flutter_chat_sdk  # Adjust path as necessary relative to your project
+    path: ./flutter_chat_sdk   # adjust path as needed
 ```
 
-## Usage
+```bash
+flutter pub get
+```
 
-### 1. Initialization
+## Setup
 
-Initialize the SDK with your WebSocket server URL. This should be done early in your application lifecycle (e.g., in `main.dart`).
+Initialize once at app startup (e.g. `main.dart`):
 
 ```dart
 import 'package:flutter_chat_sdk/flutter_chat_sdk.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   await ChatClient().init(
-    wsUrl: 'http://localhost:3000', // Replace with your Socket.IO server URL
+    wsUrl:  'http://localhost:3000',
+    apiUrl: 'http://localhost:3000',
   );
-  
+
   runApp(MyApp());
 }
 ```
 
-### 2. Authentication
+`init()` restores a persisted session automatically. Pass `userId`, `username`, and `token` to `init()` to connect immediately, or call `connect()` separately after obtaining a JWT.
 
-Connect to the chat server with a user's identity. If a session was previously saved, the SDK can attempt to restore it automatically during initialization.
+## Authentication
 
 ```dart
-// Connect with user details
-await ChatClient().connect('user_id_123', 'John Doe');
+// Connect with a JWT obtained from your auth service
+await ChatClient().connect(
+  userId:   'user_id_123',
+  username: 'Alice',
+  token:    '<jwt>',
+);
 
-// Disconnect
+// Disconnect and clear session
 await ChatClient().disconnect();
 ```
 
-### 3. Room Management
+The token is persisted to `flutter_secure_storage` and restored on next `init()`.
 
-Join or leave specific rooms to listen for messages.
+## Rooms
 
 ```dart
-// Join a room
-ChatClient().joinRoom('room_abc_123');
+ChatClient().joinRoom('room_abc');
+ChatClient().leaveRoom('room_abc');
 
-// Leave a room
-ChatClient().leaveRoom('room_abc_123');
+// Presence (tracks who is viewing a room)
+ChatClient().joinPresence('room_abc', {'user_id': 'u1', 'username': 'Alice'});
+ChatClient().leavePresence('room_abc');
 ```
 
-### 4. Sending Messages
+## Sending Messages
 
-Send text messages or messages with attachments/payloads.
+Messages are sent via `HTTP POST /messages` (not via socket), which ensures cross-instance delivery through the Redis adapter. The client auto-generates the `id` and `created_at`.
 
 ```dart
-ChatClient().sendMessage(
-  'room_abc_123',
-  'Hello, world!',
-  type: 'text', // Optional, default is 'text'
-  title: 'Greeting', // Optional
-  payload: {'custom': 'data'}, // Optional
-  attachmentUrls: ['https://example.com/image.png'], // Optional
+await ChatClient().sendMessage({
+  'room_id': 'room_abc',
+  'event':   'message',
+  'content': 'Hello!',
+});
+```
+
+If the network is unavailable, messages are queued automatically and flushed on reconnect. Pass `allowOfflineQueue: false` to throw immediately instead.
+
+## Unsend & Read Receipts
+
+```dart
+// Soft-delete a message (owner only — enforced server-side via JWT)
+await ChatClient().unsendMessage(messageId: '<id>', roomId: 'room_abc');
+
+// Mark a message as read (call when message enters viewport)
+ChatClient().markMessageRead(messageId: '<id>', roomId: 'room_abc');
+```
+
+## Typing Indicators
+
+```dart
+// Call on every keystroke — debounced internally (500 ms default)
+ChatClient().startTyping('room_abc');
+
+// Call when message is sent or input cleared
+ChatClient().stopTyping('room_abc');
+```
+
+The server also applies an 8-second auto-stop server-side in case the client disconnects unexpectedly.
+
+## Message History
+
+```dart
+// Fetch paginated history (newest-first cursor pagination)
+final messages = await ChatClient().getRoomHistory(
+  roomId: 'room_abc',
+  limit:  50,
+  before: '2024-01-01T00:00:00.000Z',  // optional ISO timestamp cursor
 );
 ```
 
-### 5. Listening to Events
+## Streams
 
-The SDK exposes several streams to handle real-time updates.
-
-#### Incoming Messages
+| Stream | Type | Description |
+|---|---|---|
+| `messageStream` | `Stream<dynamic>` | Incoming `message` events |
+| `presenceStream` | `Stream<PresenceEvent>` | Presence join/leave/sync |
+| `typingStream` | `Stream<TypingEvent>` | Typing start/stop from other users |
+| `unsendStream` | `Stream<UnsendEvent>` | Message unsend notifications |
+| `readReceiptStream` | `Stream<ReadReceiptEvent>` | Read receipt notifications |
+| `userStream` | `Stream<User?>` | Current user (null = disconnected) |
+| `connectionStream` | `Stream<bool>` | Socket connected/disconnected |
 
 ```dart
-ChatClient().messageStream.listen((Message message) {
-  print('New message in ${message.roomId}: ${message.content}');
+ChatClient().messageStream.listen((msg) {
+  print('New message: $msg');
+});
+
+ChatClient().typingStream.listen((event) {
+  print('${event.username} ${event.isTyping ? "started" : "stopped"} typing in ${event.roomId}');
+});
+
+ChatClient().presenceStream.listen((event) {
+  // event.type: 'join' | 'leave' | 'sync'
+  print('Presence ${event.type}: ${event.members}');
 });
 ```
 
-#### User Status Updates
-
-Subscribe to a user's status to receive updates.
+## Custom Events
 
 ```dart
-// Subscribe to track a user
-ChatClient().subscribeStatus('target_user_id');
-
-// Listen for status changes
-ChatClient().userStatusStream.listen((UserStatusEvent event) {
-  print('${event.username} is now ${event.isOnline ? 'Online' : 'Offline'}');
-});
-```
-
-#### Room Events
-
-Track when users join or leave a room.
-
-```dart
-ChatClient().roomEventStream.listen((RoomEvent event) {
-  if (event.type == 'user_joined') {
-    print('${event.username} joined room ${event.roomId}');
-  } else if (event.type == 'user_left') {
-    print('${event.username} left room ${event.roomId}');
-  }
-});
-```
-
-#### Message Status Updates
-
-Track the lifecycle of a message (e.g., when it is read).
-
-```dart
-ChatClient().statusUpdateStream.listen((MessageStatusEvent event) {
-  for (var update in event.updates) {
-    print('Message ${update.messageId} status: ${update.status}');
-  }
-});
+ChatClient().on('my_event', (data) => print(data));
+ChatClient().off('my_event');
 ```
 
 ## Domain Entities
 
-- **User**: Represents a chat user with properties like `id`, `username`, `email`, `isOnline`, etc.
-- **Message**: Represents a chat message with `id`, `roomId`, `content`, `type`, `status`, `createdAt`, etc.
-- **Room**: Represents a chat room.
+| Entity | Key Fields |
+|---|---|
+| `User` | `id`, `username`, `isOnline` |
+| `PresenceEvent` | `type` (join/leave/sync), `members` |
+| `TypingEvent` | `userId`, `username`, `roomId`, `isTyping` |
+| `UnsendEvent` | `messageId`, `roomId`, `unsentBy`, `unsentAt` |
+| `ReadReceiptEvent` | `messageId`, `roomId`, `readBy` |
 
-## Contributing
+## Running the Example App
 
-Contributions are welcome! Please submit a pull request or open an issue for any bugs or feature requests.
+```bash
+cd example
+flutter run
+```

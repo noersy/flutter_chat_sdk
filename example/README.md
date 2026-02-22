@@ -1,16 +1,20 @@
-# example
+# Flutter Chat SDK — Example App
 
-A new Flutter project.
+Demo app for the `flutter_chat_sdk` package.
 
-## Getting Started
+## Running
 
-This project is a starting point for a Flutter application.
+```bash
+cd flutter_chat_sdk/example
+flutter pub get
+flutter run
+```
 
-A few resources to get you started if this is your first Flutter project:
+Make sure the `backend-node` server is running first:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+```bash
+cd backend-node
+npm run dev
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The example app connects to `http://localhost:3000` by default.
