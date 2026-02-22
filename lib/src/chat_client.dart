@@ -180,7 +180,6 @@ class ChatClient {
     final fullPayload = {
       ...messageData,
       'id': messageId,
-      'user_id': _currentUser!.id,
       'username': _currentUser!.username,
       'created_at': timestamp,
       'topic': roomId,
