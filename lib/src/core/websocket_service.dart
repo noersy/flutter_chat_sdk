@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 // ignore: library_prefixes
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import '../domain/entities/unsend_event.dart';
+import '../domain/entities/read_receipt_event.dart';
 
 /// Represents a presence event from the backend
 class PresenceEvent {
@@ -37,9 +39,15 @@ class WebSocketService {
   final StreamController<dynamic> _messageController = StreamController<dynamic>.broadcast();
   final StreamController<PresenceEvent> _presenceController =
       StreamController<PresenceEvent>.broadcast();
+  final StreamController<UnsendEvent> _unsendController =
+      StreamController<UnsendEvent>.broadcast();
+  final StreamController<ReadReceiptEvent> _readReceiptController =
+      StreamController<ReadReceiptEvent>.broadcast();
 
   Stream<dynamic> get messageStream => _messageController.stream;
   Stream<PresenceEvent> get presenceStream => _presenceController.stream;
+  Stream<UnsendEvent> get unsendStream => _unsendController.stream;
+  Stream<ReadReceiptEvent> get readReceiptStream => _readReceiptController.stream;
 
   /// Connect using Socket.IO protocol.
   /// [url] should be http(s)://host:port (e.g. "http://localhost:8080")
@@ -120,6 +128,20 @@ class WebSocketService {
       _presenceController.add(PresenceEvent.fromSync('unknown', listData));
     });
 
+    _socket!.on('message_unsent', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        _unsendController.add(UnsendEvent.fromJson(json));
+      }
+    });
+
+    _socket!.on('message_read', (data) {
+      final json = _toMap(data);
+      if (json != null) {
+        _readReceiptController.add(ReadReceiptEvent.fromJson(json));
+      }
+    });
+
     _socket!.on('error', (data) {
       debugPrint('Socket.IO error: $data');
     });
@@ -171,6 +193,8 @@ class WebSocketService {
     _disconnect();
     _messageController.close();
     _presenceController.close();
+    _unsendController.close();
+    _readReceiptController.close();
   }
 
   /// Safely converts socket.io event data to `Map<String, dynamic>`.

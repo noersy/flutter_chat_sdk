@@ -5,6 +5,8 @@ import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import 'core/websocket_service.dart';
 import 'domain/entities/user.dart';
+import 'domain/entities/unsend_event.dart';
+import 'domain/entities/read_receipt_event.dart';
 
 export 'core/websocket_service.dart' show PresenceEvent;
 
@@ -33,6 +35,10 @@ class ChatClient {
 
   // Presence Stream
   Stream<PresenceEvent> get presenceStream => _webSocketService.presenceStream;
+
+  // Unsend and read receipt streams
+  Stream<UnsendEvent> get unsendStream => _webSocketService.unsendStream;
+  Stream<ReadReceiptEvent> get readReceiptStream => _webSocketService.readReceiptStream;
 
   bool _initialized = false;
   String? _wsUrl;
@@ -173,6 +179,63 @@ class ChatClient {
       await _dio.post('$_apiUrl/messages', data: body);
     } catch (e) {
       debugPrint('Failed to send message: $e');
+      rethrow;
+    }
+  }
+
+  /// Unsend (soft-delete) a previously sent message.
+  /// Only the original sender should call this.
+  Future<void> unsendMessage({
+    required String messageId,
+    required String roomId,
+  }) async {
+    _requireAuth();
+    _webSocketService.emit('message_unsend', {
+      'message_id': messageId,
+      'room_id':    roomId,
+      'user_id':    _currentUser!.id,
+    });
+  }
+
+  /// Mark a message as read by the current user.
+  /// Call this when the message becomes visible in the viewport.
+  void markMessageRead({
+    required String messageId,
+    required String roomId,
+  }) {
+    _requireAuth();
+    _webSocketService.emit('message_read', {
+      'message_id': messageId,
+      'room_id':    roomId,
+      'user_id':    _currentUser!.id,
+      'username':   _currentUser!.username,
+    });
+  }
+
+  /// Fetch paginated message history for a room via HTTP.
+  /// [before]: ISO timestamp cursor for loading older messages.
+  /// Returns raw JSON list; map to ChatMessage.fromJson() as needed.
+  Future<List<Map<String, dynamic>>> getRoomHistory({
+    required String roomId,
+    int limit = 50,
+    String? before,
+  }) async {
+    _requireAuth();
+    if (_apiUrl == null) throw Exception('API URL not set');
+
+    final queryParams = <String, dynamic>{'limit': limit};
+    if (before != null) queryParams['before'] = before;
+
+    try {
+      final response = await _dio.get(
+        '$_apiUrl/rooms/$roomId/messages',
+        queryParameters: queryParams,
+      );
+      final data = response.data as Map<String, dynamic>;
+      final rawList = data['messages'] as List<dynamic>? ?? [];
+      return rawList.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (e) {
+      debugPrint('[ChatSDK] getRoomHistory error: $e');
       rethrow;
     }
   }
