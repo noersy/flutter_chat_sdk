@@ -126,12 +126,14 @@ class ChatClient {
 
     // Set Dio Authorization interceptor
     _dio.interceptors.clear();
-    _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) {
-        options.headers['Authorization'] = 'Bearer $_currentToken';
-        handler.next(options);
-      },
-    ));
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          options.headers['Authorization'] = 'Bearer $_currentToken';
+          handler.next(options);
+        },
+      ),
+    );
 
     _connectSocketIO(token);
   }
@@ -187,10 +189,7 @@ class ChatClient {
   /// subscribe time if an empty map is sent.
   void leavePresence(String roomId, [Map<String, dynamic>? payload]) {
     _requireAuth();
-    _webSocketService.emit('presence_unsubscribe', {
-      'room_id': roomId,
-      'payload': payload ?? {},
-    });
+    _webSocketService.emit('presence_unsubscribe', {'room_id': roomId, 'payload': payload ?? {}});
   }
 
   /// Send a message via HTTP POST.
@@ -217,6 +216,7 @@ class ChatClient {
     final fullPayload = {
       ...messageData,
       'id': messageId,
+      'user_id': _currentUser!.id,
       'username': _currentUser!.username,
       'created_at': timestamp,
       'topic': roomId,
@@ -225,11 +225,7 @@ class ChatClient {
 
     final body = {
       'messages': [
-        {
-          'topic': roomId,
-          'event': 'message',
-          'payload': fullPayload,
-        },
+        {'topic': roomId, 'event': 'message', 'payload': fullPayload},
       ],
     };
 
@@ -258,28 +254,16 @@ class ChatClient {
 
   /// Unsend (soft-delete) a previously sent message.
   /// Only the original sender should call this.
-  Future<void> unsendMessage({
-    required String messageId,
-    required String roomId,
-  }) async {
+  Future<void> unsendMessage({required String messageId, required String roomId}) async {
     _requireAuth();
-    _webSocketService.emit('message_unsend', {
-      'message_id': messageId,
-      'room_id':    roomId,
-    });
+    _webSocketService.emit('message_unsend', {'message_id': messageId, 'room_id': roomId});
   }
 
   /// Mark a message as read by the current user.
   /// Call this when the message becomes visible in the viewport.
-  void markMessageRead({
-    required String messageId,
-    required String roomId,
-  }) {
+  void markMessageRead({required String messageId, required String roomId}) {
     _requireAuth();
-    _webSocketService.emit('message_read', {
-      'message_id': messageId,
-      'room_id':    roomId,
-    });
+    _webSocketService.emit('message_read', {'message_id': messageId, 'room_id': roomId});
   }
 
   /// Fetch paginated message history for a room via HTTP.
@@ -345,7 +329,9 @@ class ChatClient {
   }
 
   void _cancelAllTypingTimers() {
-    for (final t in _typingTimers.values) { t.cancel(); }
+    for (final t in _typingTimers.values) {
+      t.cancel();
+    }
     _typingTimers.clear();
   }
 

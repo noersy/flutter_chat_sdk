@@ -405,74 +405,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  void _sendTransactionData() {
-    final titleCtrl = TextEditingController(text: 'Order #12345');
-    final contentCtrl = TextEditingController(text: 'Check transaction details');
-    final categoryCtrl = TextEditingController(text: 'Gaming Account');
-    final accountIdCtrl = TextEditingController(text: 'player123');
-    final notesCtrl = TextEditingController(text: 'Verified seller');
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Send Transaction Data'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleCtrl,
-                decoration: const InputDecoration(labelText: 'Title'),
-              ),
-              TextField(
-                controller: contentCtrl,
-                decoration: const InputDecoration(labelText: 'Content'),
-              ),
-              TextField(
-                controller: categoryCtrl,
-                decoration: const InputDecoration(labelText: 'Category'),
-              ),
-              TextField(
-                controller: accountIdCtrl,
-                decoration: const InputDecoration(labelText: 'Account ID'),
-              ),
-              TextField(
-                controller: notesCtrl,
-                decoration: const InputDecoration(labelText: 'Notes'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              _client.sendMessage({
-                'room_id': _currentRoomId,
-                'content': contentCtrl.text,
-                'type': 'data',
-                'title': titleCtrl.text,
-                'payload': {
-                  'category': categoryCtrl.text,
-                  'account_id': accountIdCtrl.text,
-                  'notes': notesCtrl.text,
-                },
-              });
-              Navigator.pop(ctx);
-            },
-            child: const Text('Send'),
-          ),
-        ],
-      ),
-    ).then((_) {
-      titleCtrl.dispose();
-      contentCtrl.dispose();
-      categoryCtrl.dispose();
-      accountIdCtrl.dispose();
-      notesCtrl.dispose();
-    });
-  }
-
   void _scrollToBottom() {
     // Postpone the scroll until the layout is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -536,11 +468,7 @@ class _ChatPageState extends State<ChatPage> {
               ),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.receipt_long),
-            onPressed: _sendTransactionData,
-            tooltip: 'Send Transaction Data',
-          ),
+
           Builder(
             builder: (context) => IconButton(
               icon: const Icon(Icons.people),
@@ -625,10 +553,7 @@ class _ChatPageState extends State<ChatPage> {
                       final msg = _messages[index];
                       final userId = msg['user_id']?.toString() ?? 'unknown';
                       final username = msg['username'] as String? ?? 'Unknown';
-                      final type = msg['type'] as String? ?? 'text';
                       final content = msg['content'] as String? ?? '';
-                      final title = msg['title'] as String?;
-                      final payload = msg['payload'] as Map<String, dynamic>?;
                       final createdAtStr = msg['created_at'] as String?;
                       final createdAt = createdAtStr != null
                           ? DateTime.tryParse(createdAtStr)
@@ -705,55 +630,9 @@ class _ChatPageState extends State<ChatPage> {
                                             fontSize: 10,
                                           ),
                                         ),
-                                      if (type != 'text') ...[
-                                        const SizedBox(width: 4),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 1,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black12,
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            type.toUpperCase(),
-                                            style: const TextStyle(
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
                                     ],
                                   ),
-                                  if (title != null)
-                                    Text(
-                                      title,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
                                   Text(content),
-                                  if (payload != null)
-                                    Container(
-                                      margin: const EdgeInsets.only(top: 4),
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white54,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        payload.entries
-                                            .map((e) => '${e.key}: ${e.value}')
-                                            .join('\n'),
-                                        style: const TextStyle(
-                                          fontSize: 9,
-                                          fontStyle: FontStyle.italic,
-                                        ),
-                                      ),
-                                    ),
                                   if (createdAt != null)
                                     Text(
                                       _formatTime(createdAt),
