@@ -122,6 +122,7 @@ class _ChatPageState extends State<ChatPage> {
   StreamSubscription? _messageSubscription;
   StreamSubscription? _presenceSubscription;
   StreamSubscription? _typingSubscription;
+  StreamSubscription? _unsendSubscription;
 
   @override
   void initState() {
@@ -204,6 +205,16 @@ class _ChatPageState extends State<ChatPage> {
           } else {
             _typingUsers.remove(event.username);
           }
+        });
+      }
+    });
+
+    // Listen to unsend events
+    _unsendSubscription = _client.unsendStream.listen((event) {
+      if (!mounted) return;
+      if (event.roomId == _currentRoomId) {
+        setState(() {
+          _messages.removeWhere((msg) => msg['id'] == event.messageId);
         });
       }
     });
@@ -408,6 +419,7 @@ class _ChatPageState extends State<ChatPage> {
     _messageSubscription?.cancel();
     _presenceSubscription?.cancel();
     _typingSubscription?.cancel();
+    _unsendSubscription?.cancel();
     _client.disconnect();
     _messageFocusNode.dispose();
     _scrollController.dispose();
@@ -524,83 +536,125 @@ class _ChatPageState extends State<ChatPage> {
                       return ListTile(
                         title: Align(
                           alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: isSystem
-                                  ? Colors.orange[50]
-                                  : (isMe ? Colors.blue[100] : Colors.grey[200]),
-                              borderRadius: BorderRadius.circular(8),
-                              border: isSystem ? Border.all(color: Colors.orange[200]!) : null,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: isMe
-                                  ? CrossAxisAlignment.end
-                                  : CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      isMe ? 'You' : username,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 10,
+                          child: GestureDetector(
+                            onLongPress: isMe
+                                ? () {
+                                    final messageId = msg['id'] as String?;
+                                    if (messageId != null) {
+                                      showDialog(
+                                        context: context,
+                                        builder: (ctx) => AlertDialog(
+                                          title: const Text('Unsend Message'),
+                                          content: const Text(
+                                            'Are you sure you want to delete this message?',
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(ctx),
+                                              child: const Text('Cancel'),
+                                            ),
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.red,
+                                              ),
+                                              onPressed: () {
+                                                Navigator.pop(ctx);
+                                                _client.unsendMessage(
+                                                  messageId: messageId,
+                                                  roomId: _currentRoomId,
+                                                );
+                                              },
+                                              child: const Text(
+                                                'Delete',
+                                                style: TextStyle(color: Colors.white),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }
+                                  }
+                                : null,
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: isSystem
+                                    ? Colors.orange[50]
+                                    : (isMe ? Colors.blue[100] : Colors.grey[200]),
+                                borderRadius: BorderRadius.circular(8),
+                                border: isSystem ? Border.all(color: Colors.orange[200]!) : null,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: isMe
+                                    ? CrossAxisAlignment.end
+                                    : CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        isMe ? 'You' : username,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 10,
+                                        ),
                                       ),
-                                    ),
-                                    if (type != 'text') ...[
-                                      const SizedBox(width: 4),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 4,
-                                          vertical: 1,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black12,
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: Text(
-                                          type.toUpperCase(),
-                                          style: const TextStyle(
-                                            fontSize: 8,
-                                            fontWeight: FontWeight.bold,
+                                      if (type != 'text') ...[
+                                        const SizedBox(width: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 1,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black12,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            type.toUpperCase(),
+                                            style: const TextStyle(
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.bold,
+                                            ),
                                           ),
                                         ),
-                                      ),
+                                      ],
                                     ],
-                                  ],
-                                ),
-                                if (title != null)
-                                  Text(
-                                    title,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
                                   ),
-                                Text(content),
-                                if (payload != null)
-                                  Container(
-                                    margin: const EdgeInsets.only(top: 4),
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white54,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      payload.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
+                                  if (title != null)
+                                    Text(
+                                      title,
                                       style: const TextStyle(
-                                        fontSize: 9,
-                                        fontStyle: FontStyle.italic,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
                                       ),
                                     ),
-                                  ),
-                                if (createdAt != null)
-                                  Text(
-                                    _formatTime(createdAt),
-                                    style: const TextStyle(fontSize: 8, color: Colors.black54),
-                                  ),
-                              ],
+                                  Text(content),
+                                  if (payload != null)
+                                    Container(
+                                      margin: const EdgeInsets.only(top: 4),
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white54,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        payload.entries
+                                            .map((e) => '${e.key}: ${e.value}')
+                                            .join('\n'),
+                                        style: const TextStyle(
+                                          fontSize: 9,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ),
+                                  if (createdAt != null)
+                                    Text(
+                                      _formatTime(createdAt),
+                                      style: const TextStyle(fontSize: 8, color: Colors.black54),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
