@@ -112,6 +112,9 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoadingHistory = false;
   final ScrollController _scrollController = ScrollController();
 
+  // Connection state
+  bool _isConnected = false;
+
   // Track online users manually from presence events
   final Map<String, Map<String, dynamic>> _onlineUsers = {};
 
@@ -124,6 +127,7 @@ class _ChatPageState extends State<ChatPage> {
   StreamSubscription? _typingSubscription;
   StreamSubscription? _unsendSubscription;
   StreamSubscription? _readReceiptSubscription;
+  StreamSubscription? _connectionSubscription;
 
   @override
   void initState() {
@@ -138,6 +142,14 @@ class _ChatPageState extends State<ChatPage> {
       userId: widget.userId,
       username: widget.username,
     );
+
+    // Listen to connection state
+    _connectionSubscription = _client.connectionStream.listen((connected) {
+      if (!mounted) return;
+      setState(() {
+        _isConnected = connected;
+      });
+    });
 
     // Setup listeners BEFORE joining room to avoid race condition
     _messageSubscription = _client.messageStream.listen((message) {
@@ -466,6 +478,7 @@ class _ChatPageState extends State<ChatPage> {
     _typingSubscription?.cancel();
     _unsendSubscription?.cancel();
     _readReceiptSubscription?.cancel();
+    _connectionSubscription?.cancel();
     _client.disconnect();
     _messageFocusNode.dispose();
     _scrollController.dispose();
@@ -485,6 +498,28 @@ class _ChatPageState extends State<ChatPage> {
           ],
         ),
         actions: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16.0),
+              child: Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isConnected ? Colors.green : Colors.red,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _isConnected ? 'Connected' : 'Disconnected',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.receipt_long),
             onPressed: _sendTransactionData,
@@ -534,6 +569,19 @@ class _ChatPageState extends State<ChatPage> {
       ),
       body: Column(
         children: [
+          // Disconnected Banner
+          if (!_isConnected)
+            Container(
+              width: double.infinity,
+              color: Colors.red.shade100,
+              padding: const EdgeInsets.symmetric(vertical: 4.0),
+              child: const Text(
+                'You are currently offline. Messages will be queued.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.red, fontSize: 12),
+              ),
+            ),
+
           // Room Switcher
           Padding(
             padding: const EdgeInsets.all(8.0),
