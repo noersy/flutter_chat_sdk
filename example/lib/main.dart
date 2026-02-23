@@ -354,9 +354,7 @@ class _ChatPageState extends State<ChatPage> {
 
           List<Map<String, dynamic>> formattedHistory = [];
           for (var msg in history) {
-            if (msg is Map) {
-              formattedHistory.add(Map<String, dynamic>.from(msg));
-            }
+            formattedHistory.add(Map<String, dynamic>.from(msg));
           }
           // Assuming the SDK returns newest first, reverse so oldest is at top
           _messages.addAll(formattedHistory.reversed);
