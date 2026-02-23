@@ -109,13 +109,19 @@ class _ChatPageState extends State<ChatPage> {
 
   String _currentRoomId = 'general';
   final List<Map<String, dynamic>> _messages = [];
+  bool _isLoadingHistory = false;
+  final ScrollController _scrollController = ScrollController();
 
   // Track online users manually from presence events
   final Map<String, Map<String, dynamic>> _onlineUsers = {};
 
+  // Track users currently typing
+  final Set<String> _typingUsers = {};
+
   // Stream subscriptions for cleanup
   StreamSubscription? _messageSubscription;
   StreamSubscription? _presenceSubscription;
+  StreamSubscription? _typingSubscription;
 
   @override
   void initState() {
@@ -136,8 +142,14 @@ class _ChatPageState extends State<ChatPage> {
       if (!mounted) return;
       if (message is Map<String, dynamic> && message['room_id'] == _currentRoomId) {
         setState(() {
+          // Avoid duplicate messages if it was already loaded from history
+          final msgId = message['id'];
+          if (msgId != null && _messages.any((m) => m['id'] == msgId)) {
+            return;
+          }
           _messages.add(message);
         });
+        _scrollToBottom();
       }
     });
 
@@ -181,6 +193,21 @@ class _ChatPageState extends State<ChatPage> {
       });
     });
 
+    // Listen to typing events
+    _typingSubscription = _client.typingStream.listen((event) {
+      if (!mounted) return;
+      // Only process events for the current room and ignore self-typing events
+      if (event.roomId == _currentRoomId && event.userId != widget.userId) {
+        setState(() {
+          if (event.isTyping) {
+            _typingUsers.add(event.username);
+          } else {
+            _typingUsers.remove(event.username);
+          }
+        });
+      }
+    });
+
     // Now join room after listeners are ready
     debugPrint('✅ Initialized, joining room...');
     _joinRoom(_currentRoomId);
@@ -215,6 +242,7 @@ class _ChatPageState extends State<ChatPage> {
       setState(() {
         _messages.clear();
         _onlineUsers.clear(); // Clear members when switching rooms
+        _typingUsers.clear(); // Clear typing status
         _currentRoomId = roomId;
       });
     }
@@ -229,6 +257,47 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined room: $roomId')));
+
+    // Fetch History
+    _fetchRoomHistory(roomId);
+  }
+
+  Future<void> _fetchRoomHistory(String roomId) async {
+    setState(() {
+      _isLoadingHistory = true;
+    });
+
+    try {
+      final history = await _client.getRoomHistory(roomId: roomId, limit: 50);
+
+      if (mounted && _currentRoomId == roomId) {
+        setState(() {
+          _messages.clear();
+
+          List<Map<String, dynamic>> formattedHistory = [];
+          for (var msg in history) {
+            if (msg is Map) {
+              formattedHistory.add(Map<String, dynamic>.from(msg));
+            }
+          }
+          // Assuming the SDK returns newest first, reverse so oldest is at top
+          _messages.addAll(formattedHistory.reversed);
+        });
+        _scrollToBottom();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to load history: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingHistory = false;
+        });
+      }
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -241,7 +310,9 @@ class _ChatPageState extends State<ChatPage> {
         'type': 'text',
       });
       _messageController.clear();
+      _client.stopTyping(_currentRoomId);
       _messageFocusNode.requestFocus();
+      _scrollToBottom();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -319,12 +390,27 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
+  void _scrollToBottom() {
+    // Postpone the scroll until the layout is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   @override
   void dispose() {
     _messageSubscription?.cancel();
     _presenceSubscription?.cancel();
+    _typingSubscription?.cancel();
     _client.disconnect();
     _messageFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -414,97 +500,133 @@ class _ChatPageState extends State<ChatPage> {
           ),
 
           Expanded(
-            child: ListView.builder(
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final msg = _messages[index];
-                final userId = msg['user_id'] as String? ?? 'unknown';
-                final username = msg['username'] as String? ?? 'Unknown';
-                final type = msg['type'] as String? ?? 'text';
-                final content = msg['content'] as String? ?? '';
-                final title = msg['title'] as String?;
-                final payload = msg['payload'] as Map<String, dynamic>?;
-                final createdAtStr = msg['created_at'] as String?;
-                final createdAt = createdAtStr != null ? DateTime.tryParse(createdAtStr) : null;
+            child: _isLoadingHistory
+                ? const Center(child: CircularProgressIndicator())
+                : ListView.builder(
+                    controller: _scrollController,
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) {
+                      final msg = _messages[index];
+                      final userId = msg['user_id'] as String? ?? 'unknown';
+                      final username = msg['username'] as String? ?? 'Unknown';
+                      final type = msg['type'] as String? ?? 'text';
+                      final content = msg['content'] as String? ?? '';
+                      final title = msg['title'] as String?;
+                      final payload = msg['payload'] as Map<String, dynamic>?;
+                      final createdAtStr = msg['created_at'] as String?;
+                      final createdAt = createdAtStr != null
+                          ? DateTime.tryParse(createdAtStr)
+                          : null;
 
-                final isMe = userId == widget.userId;
-                final isSystem = userId == 'system';
+                      final isMe = userId == widget.userId;
+                      final isSystem = userId == 'system';
 
-                return ListTile(
-                  title: Align(
-                    alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: isSystem
-                            ? Colors.orange[50]
-                            : (isMe ? Colors.blue[100] : Colors.grey[200]),
-                        borderRadius: BorderRadius.circular(8),
-                        border: isSystem ? Border.all(color: Colors.orange[200]!) : null,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: isMe
-                            ? CrossAxisAlignment.end
-                            : CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                isMe ? 'You' : username,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
-                              ),
-                              if (type != 'text') ...[
-                                const SizedBox(width: 4),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black12,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    type.toUpperCase(),
+                      return ListTile(
+                        title: Align(
+                          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: isSystem
+                                  ? Colors.orange[50]
+                                  : (isMe ? Colors.blue[100] : Colors.grey[200]),
+                              borderRadius: BorderRadius.circular(8),
+                              border: isSystem ? Border.all(color: Colors.orange[200]!) : null,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: isMe
+                                  ? CrossAxisAlignment.end
+                                  : CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      isMe ? 'You' : username,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                    if (type != 'text') ...[
+                                      const SizedBox(width: 4),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 4,
+                                          vertical: 1,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black12,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          type.toUpperCase(),
+                                          style: const TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                if (title != null)
+                                  Text(
+                                    title,
                                     style: const TextStyle(
-                                      fontSize: 8,
                                       fontWeight: FontWeight.bold,
+                                      fontSize: 12,
                                     ),
                                   ),
-                                ),
+                                Text(content),
+                                if (payload != null)
+                                  Container(
+                                    margin: const EdgeInsets.only(top: 4),
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white54,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      payload.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                  ),
+                                if (createdAt != null)
+                                  Text(
+                                    _formatTime(createdAt),
+                                    style: const TextStyle(fontSize: 8, color: Colors.black54),
+                                  ),
                               ],
-                            ],
+                            ),
                           ),
-                          if (title != null)
-                            Text(
-                              title,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                            ),
-                          Text(content),
-                          if (payload != null)
-                            Container(
-                              margin: const EdgeInsets.only(top: 4),
-                              padding: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: Colors.white54,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                payload.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
-                                style: const TextStyle(fontSize: 9, fontStyle: FontStyle.italic),
-                              ),
-                            ),
-                          if (createdAt != null)
-                            Text(
-                              _formatTime(createdAt),
-                              style: const TextStyle(fontSize: 8, color: Colors.black54),
-                            ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
+
+          // Typing Indicator
+          if (_typingUsers.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _typingUsers.length == 1
+                      ? '${_typingUsers.first} is typing...'
+                      : '${_typingUsers.join(', ')} are typing...',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                    color: Colors.grey,
+                  ),
+                ),
+              ),
+            ),
 
           // Message Input
           Padding(
@@ -517,7 +639,17 @@ class _ChatPageState extends State<ChatPage> {
                     focusNode: _messageFocusNode,
                     autofocus: true,
                     decoration: const InputDecoration(labelText: 'Message'),
-                    onSubmitted: (_) => _sendMessage(),
+                    onChanged: (text) {
+                      if (text.isNotEmpty) {
+                        _client.startTyping(_currentRoomId);
+                      } else {
+                        _client.stopTyping(_currentRoomId);
+                      }
+                    },
+                    onSubmitted: (_) {
+                      _sendMessage();
+                      _client.stopTyping(_currentRoomId);
+                    },
                   ),
                 ),
                 IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
