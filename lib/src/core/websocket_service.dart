@@ -49,7 +49,6 @@ class WebSocketService {
 
     debugPrint('Connecting to Socket.IO at: $url/socket.io/');
     final builder = IO.OptionBuilder().setPath('/socket.io/').setTransports([
-      'polling',
       'websocket',
     ]).enableForceNewConnection();
 
