@@ -123,6 +123,7 @@ class _ChatPageState extends State<ChatPage> {
   StreamSubscription? _presenceSubscription;
   StreamSubscription? _typingSubscription;
   StreamSubscription? _unsendSubscription;
+  StreamSubscription? _readReceiptSubscription;
 
   @override
   void initState() {
@@ -151,6 +152,14 @@ class _ChatPageState extends State<ChatPage> {
           _messages.add(message);
         });
         _scrollToBottom();
+
+        // Notify server that we've read this incoming message if it's not from us
+        if (message['user_id'] != widget.userId && message['user_id'] != 'system') {
+          final msgId = message['id'] as String?;
+          if (msgId != null) {
+            _client.markMessageRead(messageId: msgId, roomId: _currentRoomId);
+          }
+        }
       }
     });
 
@@ -215,6 +224,42 @@ class _ChatPageState extends State<ChatPage> {
       if (event.roomId == _currentRoomId) {
         setState(() {
           _messages.removeWhere((msg) => msg['id'] == event.messageId);
+        });
+      }
+    });
+
+    // Listen to read receipt events
+    _readReceiptSubscription = _client.readReceiptStream.listen((event) {
+      if (!mounted) return;
+      if (event.roomId == _currentRoomId) {
+        setState(() {
+          // Find the message and update its read_by list
+          final index = _messages.indexWhere((msg) => msg['id'] == event.messageId);
+          if (index != -1) {
+            final msg = _messages[index];
+            final rawReadBy = msg['read_by'];
+            List<dynamic> readByList = [];
+
+            if (rawReadBy is List) {
+              readByList = List.from(rawReadBy);
+            }
+
+            // Check if already read by this user
+            final alreadyRead = readByList.any(
+              (r) => r is Map && r['user_id'] == event.readBy.userId,
+            );
+            if (!alreadyRead) {
+              readByList.add({
+                'user_id': event.readBy.userId,
+                'username': event.readBy.username,
+                'read_at': event.readBy.readAt.toIso8601String(),
+              });
+
+              // Only update if it actually changed to trigger rebuild
+              // We create a new map to ensure the reference changes and UI rebuilds correctly
+              _messages[index] = Map<String, dynamic>.from(msg)..['read_by'] = readByList;
+            }
+          }
         });
       }
     });
@@ -420,6 +465,7 @@ class _ChatPageState extends State<ChatPage> {
     _presenceSubscription?.cancel();
     _typingSubscription?.cancel();
     _unsendSubscription?.cancel();
+    _readReceiptSubscription?.cancel();
     _client.disconnect();
     _messageFocusNode.dispose();
     _scrollController.dispose();
@@ -529,6 +575,7 @@ class _ChatPageState extends State<ChatPage> {
                       final createdAt = createdAtStr != null
                           ? DateTime.tryParse(createdAtStr)
                           : null;
+                      final rawReadBy = msg['read_by'] as List<dynamic>? ?? [];
 
                       final isMe = userId == widget.userId;
                       final isSystem = userId == 'system';
@@ -652,6 +699,17 @@ class _ChatPageState extends State<ChatPage> {
                                     Text(
                                       _formatTime(createdAt),
                                       style: const TextStyle(fontSize: 8, color: Colors.black54),
+                                    ),
+                                  if (isMe && rawReadBy.isNotEmpty)
+                                    Container(
+                                      margin: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        'Read by ${rawReadBy.map((r) => r is Map ? (r['username'] ?? 'Unknown') : 'Unknown').join(', ')}',
+                                        style: const TextStyle(
+                                          fontSize: 8,
+                                          color: Colors.blueAccent,
+                                        ),
+                                      ),
                                     ),
                                 ],
                               ),
