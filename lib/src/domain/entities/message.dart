@@ -5,24 +5,20 @@ class ReadReceipt extends Equatable {
   final String username;
   final DateTime readAt;
 
-  const ReadReceipt({
-    required this.userId,
-    required this.username,
-    required this.readAt,
-  });
+  const ReadReceipt({required this.userId, required this.username, required this.readAt});
 
   factory ReadReceipt.fromJson(Map<String, dynamic> json) {
     return ReadReceipt(
-      userId:   json['user_id'] as String? ?? '',
+      userId: json['user_id']?.toString() ?? '',
       username: json['username'] as String? ?? 'Unknown',
-      readAt:   DateTime.tryParse(json['read_at'] as String? ?? '') ?? DateTime.now(),
+      readAt: DateTime.tryParse(json['read_at'] as String? ?? '') ?? DateTime.now(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'user_id':  userId,
+    'user_id': userId,
     'username': username,
-    'read_at':  readAt.toIso8601String(),
+    'read_at': readAt.toIso8601String(),
   };
 
   @override
@@ -58,10 +54,10 @@ class ChatMessage extends Equatable {
     final rawReadBy = json['read_by'] as List<dynamic>? ?? [];
     return ChatMessage(
       messageId: json['message_id'] as String? ?? json['id'] as String? ?? '',
-      roomId:    json['room_id'] as String? ?? '',
-      userId:    json['user_id'] as String? ?? '',
-      username:  json['username'] as String? ?? 'Unknown',
-      payload:   Map<String, dynamic>.from(json),
+      roomId: json['room_id'] as String? ?? '',
+      userId: json['user_id']?.toString() ?? '',
+      username: json['username'] as String? ?? 'Unknown',
+      payload: Map<String, dynamic>.from(json),
       isDeleted: json['is_deleted'] as bool? ?? json['deleted_at'] != null,
       deletedBy: json['deleted_by'] as String?,
       deletedAt: json['deleted_at'] != null
@@ -75,20 +71,17 @@ class ChatMessage extends Equatable {
     );
   }
 
-  ChatMessage copyWithDeleted({
-    required String deletedBy,
-    required DateTime deletedAt,
-  }) {
+  ChatMessage copyWithDeleted({required String deletedBy, required DateTime deletedAt}) {
     return ChatMessage(
       messageId: messageId,
-      roomId:    roomId,
-      userId:    userId,
-      username:  username,
-      payload:   payload,
+      roomId: roomId,
+      userId: userId,
+      username: username,
+      payload: payload,
       isDeleted: true,
       deletedBy: deletedBy,
       deletedAt: deletedAt,
-      readBy:    readBy,
+      readBy: readBy,
       createdAt: createdAt,
     );
   }
@@ -99,14 +92,14 @@ class ChatMessage extends Equatable {
     }
     return ChatMessage(
       messageId: messageId,
-      roomId:    roomId,
-      userId:    userId,
-      username:  username,
-      payload:   payload,
+      roomId: roomId,
+      userId: userId,
+      username: username,
+      payload: payload,
       isDeleted: isDeleted,
       deletedBy: deletedBy,
       deletedAt: deletedAt,
-      readBy:    [...readBy, receipt],
+      readBy: [...readBy, receipt],
       createdAt: createdAt,
     );
   }

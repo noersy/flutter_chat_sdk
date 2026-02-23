@@ -4,6 +4,7 @@ class TypingEvent extends Equatable {
   final String userId;
   final String username;
   final String roomId;
+
   /// true = user started typing, false = user stopped typing.
   final bool isTyping;
 
@@ -16,9 +17,9 @@ class TypingEvent extends Equatable {
 
   factory TypingEvent.fromJson(Map<String, dynamic> json, {required bool isTyping}) {
     return TypingEvent(
-      userId:   json['user_id']  as String? ?? '',
+      userId: json['user_id']?.toString() ?? '',
       username: json['username'] as String? ?? '',
-      roomId:   json['room_id']  as String? ?? '',
+      roomId: json['room_id'] as String? ?? '',
       isTyping: isTyping,
     );
   }

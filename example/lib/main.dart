@@ -560,7 +560,7 @@ class _ChatPageState extends State<ChatPage> {
                 itemCount: _onlineUsers.length,
                 itemBuilder: (context, index) {
                   final user = _onlineUsers.values.elementAt(index);
-                  final isMe = user['user_id'] == widget.userId;
+                  final isMe = user['user_id']?.toString() == widget.userId;
                   final username = user['username'] ?? 'Unknown';
 
                   return ListTile(
@@ -697,13 +697,14 @@ class _ChatPageState extends State<ChatPage> {
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Text(
-                                        isMe ? 'You' : username,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 10,
+                                      if (!isMe)
+                                        Text(
+                                          username,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 10,
+                                          ),
                                         ),
-                                      ),
                                       if (type != 'text') ...[
                                         const SizedBox(width: 4),
                                         Container(
