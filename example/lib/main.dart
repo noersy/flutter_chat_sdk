@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_chat_sdk/flutter_chat_sdk.dart';
+import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -137,11 +138,17 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _init() async {
+    // Generate a token for testing
+    final jwt = JWT({'sub': widget.userId, 'username': widget.username, 'status': 'active'});
+    // Matches JWT_SECRET in backend .env
+    final token = jwt.sign(SecretKey('fof3jXLFKHGSJX57gK3CymlmVYiKiUSkrauz9qlWI3w='));
+
     await _client.init(
       wsUrl: widget.wsUrl,
       apiUrl: widget.apiUrl,
       userId: widget.userId,
       username: widget.username,
+      token: token,
     );
 
     // Listen to connection state

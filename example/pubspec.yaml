@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_chat_sdk:
     path: ..
+  dart_jsonwebtoken: ^3.3.1
 
 dev_dependencies:
   flutter_test:
