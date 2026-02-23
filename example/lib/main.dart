@@ -128,6 +128,7 @@ class _ChatPageState extends State<ChatPage> {
   StreamSubscription? _unsendSubscription;
   StreamSubscription? _readReceiptSubscription;
   StreamSubscription? _connectionSubscription;
+  StreamSubscription? _userSubscription;
 
   @override
   void initState() {
@@ -149,6 +150,15 @@ class _ChatPageState extends State<ChatPage> {
       setState(() {
         _isConnected = connected;
       });
+    });
+
+    // Listen to user session changes
+    _userSubscription = _client.userStream.listen((user) {
+      if (!mounted) return;
+      if (user == null) {
+        debugPrint('[Example App] Session ended via userStream.');
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     });
 
     // Setup listeners BEFORE joining room to avoid race condition
@@ -479,6 +489,7 @@ class _ChatPageState extends State<ChatPage> {
     _unsendSubscription?.cancel();
     _readReceiptSubscription?.cancel();
     _connectionSubscription?.cancel();
+    _userSubscription?.cancel();
     _client.disconnect();
     _messageFocusNode.dispose();
     _scrollController.dispose();
@@ -532,13 +543,7 @@ class _ChatPageState extends State<ChatPage> {
               tooltip: 'Room Members',
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () {
-              _client.disconnect();
-              if (context.mounted) Navigator.pop(context);
-            },
-          ),
+          IconButton(icon: const Icon(Icons.logout), onPressed: () => _client.disconnect()),
         ],
       ),
       endDrawer: Drawer(
