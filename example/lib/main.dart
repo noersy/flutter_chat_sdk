@@ -34,6 +34,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
   final _usernameController = TextEditingController(text: 'User');
   final _wsUrlController = TextEditingController(text: 'http://localhost:3000');
   final _apiUrlController = TextEditingController(text: 'http://localhost:3000');
+  final _tokenController = TextEditingController();
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +60,10 @@ class _ConnectionPageState extends State<ConnectionPage> {
               controller: _usernameController,
               decoration: const InputDecoration(labelText: 'Username'),
             ),
+            TextField(
+              controller: _tokenController,
+              decoration: const InputDecoration(labelText: 'Auth Token (optional)'),
+            ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
@@ -70,6 +75,9 @@ class _ConnectionPageState extends State<ConnectionPage> {
                       apiUrl: _apiUrlController.text,
                       userId: _userIdController.text,
                       username: _usernameController.text,
+                      auth: _tokenController.text.isNotEmpty
+                          ? {'token': _tokenController.text}
+                          : null,
                     ),
                   ),
                 );
@@ -88,6 +96,7 @@ class ChatPage extends StatefulWidget {
   final String apiUrl;
   final String userId;
   final String username;
+  final Map<String, dynamic>? auth;
 
   const ChatPage({
     super.key,
@@ -95,6 +104,7 @@ class ChatPage extends StatefulWidget {
     required this.apiUrl,
     required this.userId,
     required this.username,
+    this.auth,
   });
 
   @override
@@ -129,6 +139,7 @@ class _ChatPageState extends State<ChatPage> {
       apiUrl: widget.apiUrl,
       userId: widget.userId,
       username: widget.username,
+      auth: widget.auth,
     );
 
     // Setup listeners BEFORE joining room to avoid race condition

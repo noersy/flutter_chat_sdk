@@ -43,18 +43,21 @@ class WebSocketService {
 
   /// Connect using Socket.IO protocol.
   /// [url] should be http(s)://host:port (e.g. "http://localhost:8080")
-  void connect(String url) {
+  /// [auth] optional auth map sent during handshake (e.g. {'token': 'jwt...'})
+  void connect(String url, {Map<String, dynamic>? auth}) {
     _disconnect();
 
     debugPrint('Connecting to Socket.IO at: $url/socket.io/');
-    _socket = IO.io(
-      url,
-      IO.OptionBuilder()
-          .setPath('/socket.io/')
-          .setTransports(['polling', 'websocket'])
-          .enableForceNewConnection()
-          .build(),
-    );
+    final builder = IO.OptionBuilder().setPath('/socket.io/').setTransports([
+      'polling',
+      'websocket',
+    ]).enableForceNewConnection();
+
+    if (auth != null) {
+      builder.setAuth(auth);
+    }
+
+    _socket = IO.io(url, builder.build());
 
     _socket!.onConnect((_) {
       debugPrint('[ChatSDK] Socket.IO connected');

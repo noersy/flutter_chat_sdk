@@ -37,6 +37,7 @@ class ChatClient {
   bool _initialized = false;
   String? _wsUrl;
   String? _apiUrl;
+  Map<String, dynamic>? _auth;
 
   /// Initialize the SDK.
   /// [wsUrl]: Socket.IO server URL (e.g. "http://localhost:8080")
@@ -46,11 +47,13 @@ class ChatClient {
     required String apiUrl,
     String? userId,
     String? username,
+    Map<String, dynamic>? auth,
   }) async {
     if (_initialized) return;
 
     _wsUrl = wsUrl;
     _apiUrl = apiUrl;
+    _auth = auth;
     _webSocketService = WebSocketService();
 
     _webSocketService.messageStream.listen((message) {
@@ -58,7 +61,7 @@ class ChatClient {
     });
 
     if (userId != null && username != null) {
-      await connect(userId, username);
+      await connect(userId, username, auth: auth);
     } else {
       await _restoreSession();
     }
@@ -67,7 +70,7 @@ class ChatClient {
   }
 
   /// Connect to the Socket.IO server and authenticate.
-  Future<void> connect(String userId, String username) async {
+  Future<void> connect(String userId, String username, {Map<String, dynamic>? auth}) async {
     _currentUser = User(
       id: userId,
       username: username,
@@ -77,6 +80,8 @@ class ChatClient {
       updatedAt: DateTime.now(),
     );
     _userController.add(_currentUser);
+
+    if (auth != null) _auth = auth;
 
     await _storage.write(key: _storageUserKey, value: userId);
     await _storage.write(key: _storageUsernameKey, value: username);
@@ -88,7 +93,7 @@ class ChatClient {
     if (_currentUser == null || _wsUrl == null) return;
     debugPrint('Connecting to Socket.IO: $_wsUrl');
     // WebSocketService handles connection
-    _webSocketService.connect(_wsUrl!);
+    _webSocketService.connect(_wsUrl!, auth: _auth);
   }
 
   /// Logout / Disconnect
@@ -170,7 +175,12 @@ class ChatClient {
     };
 
     try {
-      await _dio.post('$_apiUrl/messages', data: body);
+      final token = _auth?['token'] as String?;
+      await _dio.post(
+        '$_apiUrl/messages',
+        data: body,
+        options: token != null ? Options(headers: {'Authorization': 'Bearer $token'}) : null,
+      );
     } catch (e) {
       debugPrint('Failed to send message: $e');
       rethrow;
