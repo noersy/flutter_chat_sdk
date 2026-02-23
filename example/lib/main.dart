@@ -183,7 +183,7 @@ class _ChatPageState extends State<ChatPage> {
         _scrollToBottom();
 
         // Notify server that we've read this incoming message if it's not from us
-        if (message['user_id'] != widget.userId && message['user_id'] != 'system') {
+        if (message['user_id']?.toString() != widget.userId && message['user_id'] != 'system') {
           final msgId = message['id'] as String?;
           if (msgId != null) {
             _client.markMessageRead(messageId: msgId, roomId: _currentRoomId);
@@ -623,7 +623,7 @@ class _ChatPageState extends State<ChatPage> {
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
                       final msg = _messages[index];
-                      final userId = msg['user_id'] as String? ?? 'unknown';
+                      final userId = msg['user_id']?.toString() ?? 'unknown';
                       final username = msg['username'] as String? ?? 'Unknown';
                       final type = msg['type'] as String? ?? 'text';
                       final content = msg['content'] as String? ?? '';
