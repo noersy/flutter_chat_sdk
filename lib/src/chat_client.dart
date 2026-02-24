@@ -273,6 +273,7 @@ class ChatClient {
     required String roomId,
     int limit = 50,
     String? before,
+    bool autoMarkRead = true,
   }) async {
     _requireAuth();
     if (_apiUrl == null) throw Exception('API URL not set');
@@ -287,7 +288,30 @@ class ChatClient {
       );
       final data = response.data as Map<String, dynamic>;
       final rawList = data['messages'] as List<dynamic>? ?? [];
-      return rawList.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final messages = rawList.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+      if (autoMarkRead) {
+        int unreadCount = 0;
+        final myId = _currentUser!.id;
+
+        for (var msg in messages) {
+          if (msg['user_id']?.toString() != myId && msg['user_id'] != 'system') {
+            final readBy = msg['read_by'] as List<dynamic>? ?? [];
+            final alreadyRead = readBy.any((r) => r is Map && r['user_id'] == myId);
+            if (!alreadyRead) {
+              final msgId = msg['id'] as String?;
+              if (msgId != null) {
+                unreadCount++;
+                Future.delayed(Duration(milliseconds: 100 * unreadCount + 500), () {
+                  markMessageRead(messageId: msgId, roomId: roomId);
+                });
+              }
+            }
+          }
+        }
+      }
+
+      return messages;
     } catch (e) {
       debugPrint('[ChatSDK] getRoomHistory error: $e');
       rethrow;
