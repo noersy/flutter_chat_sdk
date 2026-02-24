@@ -69,8 +69,8 @@ class _ConnectionPageState extends State<ConnectionPage> {
                     builder: (context) => ChatPage(
                       wsUrl: _wsUrlController.text,
                       apiUrl: _apiUrlController.text,
-                      userId: _userIdController.text,
-                      username: _usernameController.text,
+                      userId: _userIdController.text.trim(),
+                      username: _usernameController.text.trim(),
                     ),
                   ),
                 );
@@ -363,8 +363,8 @@ class _ChatPageState extends State<ChatPage> {
           for (var msg in history) {
             formattedHistory.add(Map<String, dynamic>.from(msg));
           }
-          // Assuming the SDK returns newest first, reverse so oldest is at top
-          _messages.addAll(formattedHistory.reversed);
+          // The backend already returns messages in chronological order (oldest first).
+          _messages.addAll(formattedHistory);
         });
         _scrollToBottom();
       }
@@ -488,7 +488,7 @@ class _ChatPageState extends State<ChatPage> {
                 itemCount: _onlineUsers.length,
                 itemBuilder: (context, index) {
                   final user = _onlineUsers.values.elementAt(index);
-                  final isMe = user['user_id']?.toString() == widget.userId;
+                  final isMe = user['user_id']?.toString().trim() == widget.userId.trim();
                   final username = user['username'] ?? 'Unknown';
 
                   return ListTile(
@@ -560,8 +560,8 @@ class _ChatPageState extends State<ChatPage> {
                           : null;
                       final rawReadBy = msg['read_by'] as List<dynamic>? ?? [];
 
-                      final isMe = userId == widget.userId;
-                      final isSystem = userId == 'system';
+                      final isMe = userId.trim() == widget.userId.trim();
+                      final isSystem = userId.trim() == 'system';
 
                       return ListTile(
                         title: Align(
