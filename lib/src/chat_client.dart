@@ -252,6 +252,81 @@ class ChatClient {
     }
   }
 
+  /// Request a presigned URL from the backend to upload a file to MinIO.
+  Future<Map<String, dynamic>> _getPresignedUrl(String fileName, String mimeType) async {
+    if (_apiUrl == null) throw Exception('API URL not set');
+
+    final response = await _dio.get(
+      '$_apiUrl/api/upload/presigned-url',
+      queryParameters: {'filename': fileName, 'mimetype': mimeType},
+    );
+    return response.data as Map<String, dynamic>;
+  }
+
+  /// Execute an HTTP PUT directly to the MinIO presigned URL to push the file.
+  Future<void> _uploadFile(
+    String filepath,
+    String presignedUrl,
+    String mimeType, {
+    void Function(int count, int total)? onProgress,
+  }) async {
+    final fileBytes = await FormData.fromMap({
+      'file': await MultipartFile.fromFile(filepath),
+    }).files.first.value.finalize().toList();
+
+    // We must rebuild the raw byte stream to do a direct PUT binary upload,
+    // rather than multipart/form-data which S3 direct presigned URLs usually don't expect
+    // using basic dio Put with stream data
+    final fileData = await MultipartFile.fromFile(filepath);
+
+    await _dio.put(
+      presignedUrl,
+      data: fileData.finalize(),
+      options: Options(
+        headers: {'Content-Type': mimeType, Headers.contentLengthHeader: fileData.length},
+      ),
+      onSendProgress: onProgress,
+    );
+  }
+
+  /// Sends a file message (image, document, etc.) to a room.
+  ///
+  /// The upload happens directly from the client device to MinIO storage.
+  /// Once uploaded, a standard chat message is emitted containing the file's metadata URL.
+  Future<void> sendFileMessage({
+    required String roomId,
+    required String filepath,
+    required String fileName,
+    required String mimeType,
+    int? fileSize,
+    String? content,
+    void Function(int count, int total)? onProgress,
+  }) async {
+    _requireAuth();
+
+    // 1. Get Presigned URL
+    debugPrint('[ChatSDK] Requesting presigned URL for $fileName');
+    final presignedData = await _getPresignedUrl(fileName, mimeType);
+    final pUrl = presignedData['presignedUrl'] as String;
+    final fileUrl = presignedData['fileUrl'] as String;
+
+    // 2. Upload the file direct to MinIO
+    debugPrint('[ChatSDK] Uploading file directly to storage...');
+    await _uploadFile(filepath, pUrl, mimeType, onProgress: onProgress);
+
+    // 3. Dispatch standard WS chat message with attachment
+    debugPrint('[ChatSDK] File uploaded, dispatching WS message');
+
+    final messageData = {
+      'room_id': roomId,
+      'content': content ?? '',
+      'attachment': {'url': fileUrl, 'type': mimeType, 'name': fileName, 'size': fileSize},
+    };
+
+    // We don't queue file messages immediately if offline - upload would have failed first anyway.
+    await sendMessage(messageData, allowOfflineQueue: false);
+  }
+
   /// Unsend (soft-delete) a previously sent message.
   /// Only the original sender should call this.
   Future<void> unsendMessage({required String messageId, required String roomId}) async {

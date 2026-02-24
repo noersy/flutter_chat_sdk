@@ -2,6 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_chat_sdk/flutter_chat_sdk.dart';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:mime_type/mime_type.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -632,7 +635,58 @@ class _ChatPageState extends State<ChatPage> {
                                         ),
                                     ],
                                   ),
-                                  Text(content),
+                                  if (msg['attachment'] != null && msg['attachment'] is Map)
+                                    Builder(
+                                      builder: (context) {
+                                        final attachment = msg['attachment'] as Map;
+                                        final attachType = attachment['type'] as String? ?? '';
+                                        final url = attachment['url'] as String?;
+
+                                        if (url != null && attachType.startsWith('image/')) {
+                                          return Padding(
+                                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                            child: ClipRRect(
+                                              borderRadius: BorderRadius.circular(8.0),
+                                              child: CachedNetworkImage(
+                                                imageUrl: url,
+                                                width: 200,
+                                                fit: BoxFit.cover,
+                                                placeholder: (context, url) => const SizedBox(
+                                                  width: 200,
+                                                  height: 150,
+                                                  child: Center(child: CircularProgressIndicator()),
+                                                ),
+                                                errorWidget: (context, url, error) =>
+                                                    const SizedBox(
+                                                      width: 200,
+                                                      height: 150,
+                                                      child: Center(child: Icon(Icons.error)),
+                                                    ),
+                                              ),
+                                            ),
+                                          );
+                                        } else if (url != null) {
+                                          return Padding(
+                                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.insert_drive_file, size: 16),
+                                                const SizedBox(width: 4),
+                                                Expanded(
+                                                  child: Text(
+                                                    attachment['name'] ?? 'File',
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }
+                                        return const SizedBox.shrink();
+                                      },
+                                    ),
+                                  if (content.isNotEmpty) Text(content),
                                   if (createdAt != null)
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
@@ -708,11 +762,27 @@ class _ChatPageState extends State<ChatPage> {
               ),
             ),
 
+          // Upload Progress Bar
+          if (_isUploading)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+              child: Column(
+                children: [
+                  const Text('Uploading Attachment...'),
+                  LinearProgressIndicator(value: _uploadProgress),
+                ],
+              ),
+            ),
+
           // Message Input
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
+                IconButton(
+                  icon: const Icon(Icons.attach_file),
+                  onPressed: _isUploading ? null : _pickAndUploadImage,
+                ),
                 Expanded(
                   child: TextField(
                     controller: _messageController,
@@ -732,13 +802,68 @@ class _ChatPageState extends State<ChatPage> {
                     },
                   ),
                 ),
-                IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
+                IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: _isUploading ? null : _sendMessage,
+                ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  bool _isUploading = false;
+  double _uploadProgress = 0.0;
+
+  Future<void> _pickAndUploadImage() async {
+    final picker = ImagePicker();
+    final image = await picker.pickImage(source: ImageSource.gallery);
+    if (image == null) return;
+
+    setState(() {
+      _isUploading = true;
+      _uploadProgress = 0.0;
+    });
+
+    try {
+      final name = image.name;
+      final mime = lookupMimeType(image.path) ?? 'application/octet-stream';
+      final fileLength = await image.length();
+
+      final textContent = _messageController.text;
+
+      await _client.sendFileMessage(
+        roomId: _currentRoomId,
+        filepath: image.path,
+        fileName: name,
+        mimeType: mime,
+        fileSize: fileLength,
+        content: textContent.isNotEmpty ? textContent : null,
+        onProgress: (count, total) {
+          if (mounted && total > 0) {
+            setState(() {
+              _uploadProgress = count / total;
+            });
+          }
+        },
+      );
+
+      // Clear text context if sending attach with a message
+      _messageController.clear();
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to upload: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
+    }
   }
 
   String _formatTime(DateTime time) {
