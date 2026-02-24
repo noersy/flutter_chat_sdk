@@ -2,15 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_chat_sdk/flutter_chat_sdk.dart';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
-import 'package:flutter/foundation.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Disable all debug prints
-  if (!kDebugMode) {
-    debugPrint = (String? message, {int? wrapWidth}) {};
-  }
-
   runApp(const MyApp());
 }
 
