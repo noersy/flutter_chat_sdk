@@ -265,28 +265,29 @@ class ChatClient {
 
   /// Execute an HTTP PUT directly to the MinIO presigned URL to push the file.
   Future<void> _uploadFile(
-    String filepath,
+    List<int> fileBytes,
     String presignedUrl,
     String mimeType, {
     void Function(int count, int total)? onProgress,
   }) async {
-    final fileBytes = await FormData.fromMap({
-      'file': await MultipartFile.fromFile(filepath),
-    }).files.first.value.finalize().toList();
-
-    // We must rebuild the raw byte stream to do a direct PUT binary upload,
-    // rather than multipart/form-data which S3 direct presigned URLs usually don't expect
-    // using basic dio Put with stream data
-    final fileData = await MultipartFile.fromFile(filepath);
-
-    await _dio.put(
-      presignedUrl,
-      data: fileData.finalize(),
-      options: Options(
-        headers: {'Content-Type': mimeType, Headers.contentLengthHeader: fileData.length},
-      ),
-      onSendProgress: onProgress,
-    );
+    // We send raw bytes for direct PUT binary upload, avoiding Multipart/form-data
+    // Note: We MUST use a fresh Dio instance here to prevent the ChatClient's global
+    // interceptor from injecting the JWT Authorization header, which crashes S3 presigned URLs.
+    try {
+      final uploadClient = Dio();
+      await uploadClient.put(
+        presignedUrl,
+        data: fileBytes,
+        options: Options(
+          headers: {'Content-Type': mimeType, Headers.contentLengthHeader: fileBytes.length},
+        ),
+        onSendProgress: onProgress,
+      );
+    } on DioException catch (e) {
+      debugPrint('[ChatSDK] MinIO Upload Failed. Status: ${e.response?.statusCode}');
+      debugPrint('[ChatSDK] MinIO Upload Error Body: ${e.response?.data}');
+      rethrow;
+    }
   }
 
   /// Sends a file message (image, document, etc.) to a room.
@@ -295,7 +296,7 @@ class ChatClient {
   /// Once uploaded, a standard chat message is emitted containing the file's metadata URL.
   Future<void> sendFileMessage({
     required String roomId,
-    required String filepath,
+    required List<int> fileBytes,
     required String fileName,
     required String mimeType,
     int? fileSize,
@@ -312,7 +313,7 @@ class ChatClient {
 
     // 2. Upload the file direct to MinIO
     debugPrint('[ChatSDK] Uploading file directly to storage...');
-    await _uploadFile(filepath, pUrl, mimeType, onProgress: onProgress);
+    await _uploadFile(fileBytes, pUrl, mimeType, onProgress: onProgress);
 
     // 3. Dispatch standard WS chat message with attachment
     debugPrint('[ChatSDK] File uploaded, dispatching WS message');

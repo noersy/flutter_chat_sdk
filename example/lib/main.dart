@@ -829,14 +829,15 @@ class _ChatPageState extends State<ChatPage> {
 
     try {
       final name = image.name;
-      final mime = lookupMimeType(image.path) ?? 'application/octet-stream';
       final fileLength = await image.length();
+      final mime = lookupMimeType(image.name) ?? 'application/octet-stream';
+      final bytes = await image.readAsBytes();
 
       final textContent = _messageController.text;
 
       await _client.sendFileMessage(
         roomId: _currentRoomId,
-        filepath: image.path,
+        fileBytes: bytes,
         fileName: name,
         mimeType: mime,
         fileSize: fileLength,
