@@ -634,20 +634,50 @@ class _ChatPageState extends State<ChatPage> {
                                   ),
                                   Text(content),
                                   if (createdAt != null)
-                                    Text(
-                                      _formatTime(createdAt),
-                                      style: const TextStyle(fontSize: 8, color: Colors.black54),
-                                    ),
-                                  if (isMe && rawReadBy.isNotEmpty)
-                                    Container(
-                                      margin: const EdgeInsets.only(top: 2),
-                                      child: Text(
-                                        'Read by ${rawReadBy.map((r) => r is Map ? (r['username'] ?? 'Unknown') : 'Unknown').join(', ')}',
-                                        style: const TextStyle(
-                                          fontSize: 8,
-                                          color: Colors.blueAccent,
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          _formatTime(createdAt),
+                                          style: const TextStyle(
+                                            fontSize: 8,
+                                            color: Colors.black54,
+                                          ),
                                         ),
-                                      ),
+                                        if (isMe) ...[
+                                          const SizedBox(width: 4),
+                                          Builder(
+                                            builder: (ctx) {
+                                              // We need at least 1 other person to establish "all read"
+                                              // Number of other users in room = total online users - 1 (us)
+                                              int totalOtherUsers = _onlineUsers.length > 1
+                                                  ? _onlineUsers.length - 1
+                                                  : 1;
+                                              bool isAllRead =
+                                                  rawReadBy.length >= totalOtherUsers &&
+                                                  rawReadBy.isNotEmpty;
+
+                                              String readByNames = rawReadBy
+                                                  .map(
+                                                    (r) => r is Map
+                                                        ? (r['username'] ?? 'Unknown')
+                                                        : 'Unknown',
+                                                  )
+                                                  .join(', ');
+                                              if (readByNames.isEmpty) readByNames = 'Delivered';
+
+                                              return Tooltip(
+                                                message: 'Read by: $readByNames',
+                                                child: Icon(
+                                                  isAllRead ? Icons.done_all : Icons.check,
+                                                  size: 12,
+                                                  color: isAllRead ? Colors.blue : Colors.grey,
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                 ],
                               ),
