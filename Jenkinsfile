@@ -6,7 +6,7 @@ pipeline {
         string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to build')
         string(name: 'GIT_CREDENTIALS_ID', defaultValue: 'github-ssh-key', description: 'Jenkins credentials ID for Git')
         string(name: 'IMAGE_NAME', defaultValue: 'flutter-chat-web', description: 'Docker image name')
-        string(name: 'DEPLOY_PORT', defaultValue: '3090', description: 'Host port to expose')
+        string(name: 'DEPLOY_PORT', defaultValue: '3010', description: 'Host port to expose')
     }
 
     stages {
